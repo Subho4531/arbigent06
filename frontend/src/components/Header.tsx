@@ -1,18 +1,19 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Wallet, TrendingUp, Menu, X, Radio } from "lucide-react";
+import { Wallet, TrendingUp, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useWallet } from "@/contexts/WalletContext";
+import { usePostConnectionRedirect } from "@/hooks/useRouteProtection";
+import { NetworkStatusCompact } from "@/components/NetworkStatus";
 
-interface HeaderProps {
-  isConnected?: boolean;
-  walletAddress?: string;
-  onConnect?: () => void;
-}
-
-const Header = ({ isConnected = false, walletAddress, onConnect }: HeaderProps) => {
+const Header = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
+  const { connected, account, connect, disconnect, error } = useWallet();
+  
+  // Handle post-connection redirects
+  usePostConnectionRedirect();
   
   const navLinks = [
     { href: "/dashboard", label: "Dashboard" },
@@ -24,6 +25,18 @@ const Header = ({ isConnected = false, walletAddress, onConnect }: HeaderProps) 
   
   const truncateAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  };
+
+  const handleWalletAction = async () => {
+    try {
+      if (connected) {
+        await disconnect();
+      } else {
+        await connect('Petra');
+      }
+    } catch (error) {
+      console.error('Wallet action failed:', error);
+    }
   };
 
   return (
@@ -45,11 +58,8 @@ const Header = ({ isConnected = false, walletAddress, onConnect }: HeaderProps) 
           </div>
         </Link>
         
-        {/* Network Indicator */}
-        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full border border-primary/30 bg-primary/5">
-          <Radio className="h-3 w-3 text-primary animate-pulse" />
-          <span className="text-xs font-display text-primary">APTOS TESTNET</span>
-        </div>
+        {/* Network Status Display */}
+        <NetworkStatusCompact className="hidden md:flex" />
         
         {/* Desktop Navigation */}
         {!isLanding && (
@@ -72,13 +82,13 @@ const Header = ({ isConnected = false, walletAddress, onConnect }: HeaderProps) 
         
         {/* Wallet Button */}
         <div className="flex items-center gap-4">
-          {isConnected && walletAddress ? (
-            <Button variant="wallet" size="default" className="hidden sm:flex">
+          {connected && account?.address ? (
+            <Button variant="wallet" size="default" onClick={handleWalletAction} className="hidden sm:flex">
               <Wallet className="h-4 w-4 text-primary" />
-              {truncateAddress(walletAddress)}
+              {truncateAddress(account.address)}
             </Button>
           ) : (
-            <Button variant="wallet" size="default" onClick={onConnect} className="hidden sm:flex">
+            <Button variant="wallet" size="default" onClick={handleWalletAction} className="hidden sm:flex">
               <Wallet className="h-4 w-4 text-primary" />
               Connect Petra Wallet
             </Button>
@@ -103,11 +113,8 @@ const Header = ({ isConnected = false, walletAddress, onConnect }: HeaderProps) 
           className="md:hidden border-t border-border bg-background"
         >
           <nav className="container mx-auto flex flex-col gap-4 p-4">
-            {/* Mobile Network Indicator */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-primary/30 bg-primary/5 w-fit">
-              <Radio className="h-3 w-3 text-primary animate-pulse" />
-              <span className="text-xs font-display text-primary">APTOS TESTNET</span>
-            </div>
+            {/* Mobile Network Status */}
+            <NetworkStatusCompact />
             
             {!isLanding && navLinks.map((link) => (
               <Link
@@ -123,9 +130,9 @@ const Header = ({ isConnected = false, walletAddress, onConnect }: HeaderProps) 
                 {link.label}
               </Link>
             ))}
-            <Button variant="wallet" size="lg" onClick={onConnect} className="mt-4">
+            <Button variant="wallet" size="lg" onClick={handleWalletAction} className="mt-4">
               <Wallet className="h-4 w-4 text-primary" />
-              {isConnected ? truncateAddress(walletAddress || "") : "Connect Wallet"}
+              {connected && account?.address ? truncateAddress(account.address) : "Connect Wallet"}
             </Button>
           </nav>
         </motion.div>

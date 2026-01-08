@@ -1,25 +1,86 @@
-# Aptos Faucet Backend
+# Arbigent Backend
 
-A simple Node.js backend that provides a faucet service for Aptos Testnet.
+MongoDB-powered vault management system for the Arbigent DeFi platform.
 
-## Setup
+## Features
 
-1. **Install dependencies:**
-```bash
-cd faucet-backend
-npm install
+- **User Management**: Wallet-based user profiles and preferences
+- **Vault System**: Multi-coin vault balances with burn/mint logic
+- **Transaction Logging**: Comprehensive transaction history and analytics
+- **Agent Activity**: AI agent decision logging and performance tracking
+- **Smart Contract Integration**: Aptos blockchain integration with faucet
+
+## Quick Start
+
+1. **Install Dependencies**
+   ```bash
+   npm install
+   ```
+
+2. **Configure Environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your MongoDB URI and faucet private key
+   ```
+
+3. **Start MongoDB**
+   - Local: `mongod --dbpath /path/to/data`
+   - Or use MongoDB Atlas cloud service
+
+4. **Seed Database**
+   ```bash
+   node scripts/seedCoins.js
+   ```
+
+5. **Start Server**
+   ```bash
+   npm start
+   ```
+
+## API Documentation
+
+See [VAULT_API_ROUTES.md](../VAULT_API_ROUTES.md) for complete API documentation.
+
+## Database Models
+
+- **User**: Wallet-based user profiles
+- **Vault**: Multi-coin vault balances and strategies
+- **Coin**: Supported coins with burn/mint tracking
+- **TransactionLog**: All vault transactions and smart contract interactions
+- **AgenticLog**: AI agent activities and performance metrics
+
+## Environment Variables
+
+```env
+FAUCET_PRIVATE_KEY=your-aptos-private-key
+PORT=3001
+MONGODB_URI=mongodb://localhost:27017/arbigent
+JWT_SECRET=your-jwt-secret
+API_BASE_URL=http://localhost:3001
 ```
 
-2. **Get testnet account private key:**
+## Architecture
+
+The system implements a vault-based architecture where:
+1. Users deposit tokens → Smart contract burns tokens → Vault balance increases
+2. Users withdraw tokens → Vault balance decreases → Smart contract mints tokens
+3. All operations are logged for transparency and analytics
+4. AI agents can interact with the system and log their activities
+
+## Original Faucet Setup (Legacy)
+
+The backend also includes the original faucet functionality:
+
+1. **Get testnet account private key:**
 ```bash
 cd ../move
 aptos init --profile testnet --network testnet
 ```
 
-3. **Fund the faucet account:**
+2. **Fund the faucet account:**
 Visit https://aptos.dev/network/faucet and paste your account address to get testnet APT.
 
-4. **Get your private key:**
+3. **Get your private key:**
 ```bash
 # On Windows
 type %USERPROFILE%\.aptos\config.yaml
@@ -28,69 +89,4 @@ type %USERPROFILE%\.aptos\config.yaml
 cat ~/.aptos/config.yaml
 ```
 
-Look for the `private_key` under the `testnet` profile.
-
-5. **Create .env file:**
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and add your private key:
-```
-FAUCET_PRIVATE_KEY=0x...your_private_key_here...
-PORT=3001
-```
-
-6. **Start the server:**
-```bash
-npm start
-```
-
-The faucet will run on http://localhost:3001
-
-## API Endpoints
-
-### POST /api/faucet
-Request APT from the faucet.
-
-**Request:**
-```json
-{
-  "address": "0x...",
-  "amount": 100000000
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "txHash": "0x...",
-  "amount": 1,
-  "message": "Sent 1 APT to 0x..."
-}
-```
-
-### GET /api/health
-Check faucet status and balance.
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "faucetAddress": "0x...",
-  "balance": 10.5,
-  "network": "testnet"
-}
-```
-
-## Rate Limiting
-
-- Max 5 requests per hour per address
-- Prevents abuse
-
-## Security Notes
-
-- Keep your `.env` file secure
-- Never commit private keys to git
-- The `.env` file is in `.gitignore`
+Look for the `private_key` under the `testnet` profile and add it to your `.env` file.

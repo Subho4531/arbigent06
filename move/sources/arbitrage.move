@@ -129,19 +129,31 @@ module arbitrage::swap {
         });
     }
 
-    /// Swap APT to USDC
+    /// Swap APT to USDC - Burns APT from user and mints USDC
     public entry fun swap_apt_to_usdc(account: &signer, apt_amount: u64) acquires TokenCapabilities {
         let module_addr = @arbitrage;
         assert!(exists<TokenCapabilities<USDC>>(module_addr), E_NOT_INITIALIZED);
 
         let trader = signer::address_of(account);
+        
+        // First: Burn APT from user's account
+        let apt_balance = coin::balance<0x1::aptos_coin::AptosCoin>(trader);
+        assert!(apt_balance >= apt_amount, E_INSUFFICIENT_BALANCE);
+        
+        // Withdraw APT from user and burn it (transfer to module address)
+        let apt_coins = coin::withdraw<0x1::aptos_coin::AptosCoin>(account, apt_amount);
+        coin::deposit(module_addr, apt_coins);
+
+        // Calculate USDC amount to mint
         let rate = 8000000 + ((apt_amount % 500000) as u64);
         let usdc_amount = (apt_amount * rate) / 100000000;
 
+        // Register USDC if needed
         if (!coin::is_account_registered<USDC>(trader)) {
             coin::register<USDC>(account);
         };
 
+        // Mint USDC to user
         let caps = borrow_global<TokenCapabilities<USDC>>(module_addr);
         let coins = coin::mint<USDC>(usdc_amount, &caps.mint_cap);
         coin::deposit(trader, coins);
@@ -156,19 +168,31 @@ module arbitrage::swap {
         });
     }
 
-    /// Swap APT to USDT
+    /// Swap APT to USDT - Burns APT from user and mints USDT
     public entry fun swap_apt_to_usdt(account: &signer, apt_amount: u64) acquires TokenCapabilities {
         let module_addr = @arbitrage;
         assert!(exists<TokenCapabilities<USDT>>(module_addr), E_NOT_INITIALIZED);
 
         let trader = signer::address_of(account);
+        
+        // First: Burn APT from user's account
+        let apt_balance = coin::balance<0x1::aptos_coin::AptosCoin>(trader);
+        assert!(apt_balance >= apt_amount, E_INSUFFICIENT_BALANCE);
+        
+        // Withdraw APT from user and burn it (transfer to module address)
+        let apt_coins = coin::withdraw<0x1::aptos_coin::AptosCoin>(account, apt_amount);
+        coin::deposit(module_addr, apt_coins);
+
+        // Calculate USDT amount to mint
         let rate = 8050000 + ((apt_amount % 400000) as u64);
         let usdt_amount = (apt_amount * rate) / 100000000;
 
+        // Register USDT if needed
         if (!coin::is_account_registered<USDT>(trader)) {
             coin::register<USDT>(account);
         };
 
+        // Mint USDT to user
         let caps = borrow_global<TokenCapabilities<USDT>>(module_addr);
         let coins = coin::mint<USDT>(usdt_amount, &caps.mint_cap);
         coin::deposit(trader, coins);
@@ -274,6 +298,90 @@ module arbitrage::swap {
             to_token: b"USDC",
             amount_in: usdt_amount,
             amount_out: usdc_amount,
+            timestamp: timestamp::now_seconds(),
+        });
+    }
+
+    /// Deposit USDC to vault - Burns USDC from user (for vault balance increase)
+    public entry fun deposit_usdc_to_vault(account: &signer, usdc_amount: u64) acquires TokenCapabilities {
+        let trader = signer::address_of(account);
+        
+        // Burn USDC from user's account
+        let usdc_caps = borrow_global<TokenCapabilities<USDC>>(@arbitrage);
+        coin::burn_from<USDC>(trader, usdc_amount, &usdc_caps.burn_cap);
+
+        event::emit(SwapEvent {
+            trader,
+            from_token: b"USDC",
+            to_token: b"VAULT_USDC",
+            amount_in: usdc_amount,
+            amount_out: usdc_amount,
+            timestamp: timestamp::now_seconds(),
+        });
+    }
+
+    /// Deposit USDT to vault - Burns USDT from user (for vault balance increase)
+    public entry fun deposit_usdt_to_vault(account: &signer, usdt_amount: u64) acquires TokenCapabilities {
+        let trader = signer::address_of(account);
+        
+        // Burn USDT from user's account
+        let usdt_caps = borrow_global<TokenCapabilities<USDT>>(@arbitrage);
+        coin::burn_from<USDT>(trader, usdt_amount, &usdt_caps.burn_cap);
+
+        event::emit(SwapEvent {
+            trader,
+            from_token: b"USDT",
+            to_token: b"VAULT_USDT",
+            amount_in: usdt_amount,
+            amount_out: usdt_amount,
+            timestamp: timestamp::now_seconds(),
+        });
+    }
+
+    /// Withdraw USDC from vault - Mints USDC to user (for vault balance decrease)
+    public entry fun withdraw_usdc_from_vault(account: &signer, usdc_amount: u64) acquires TokenCapabilities {
+        let trader = signer::address_of(account);
+        
+        // Register USDC if needed
+        if (!coin::is_account_registered<USDC>(trader)) {
+            coin::register<USDC>(account);
+        };
+
+        // Mint USDC to user
+        let usdc_caps = borrow_global<TokenCapabilities<USDC>>(@arbitrage);
+        let usdc_coins = coin::mint<USDC>(usdc_amount, &usdc_caps.mint_cap);
+        coin::deposit(trader, usdc_coins);
+
+        event::emit(SwapEvent {
+            trader,
+            from_token: b"VAULT_USDC",
+            to_token: b"USDC",
+            amount_in: usdc_amount,
+            amount_out: usdc_amount,
+            timestamp: timestamp::now_seconds(),
+        });
+    }
+
+    /// Withdraw USDT from vault - Mints USDT to user (for vault balance decrease)
+    public entry fun withdraw_usdt_from_vault(account: &signer, usdt_amount: u64) acquires TokenCapabilities {
+        let trader = signer::address_of(account);
+        
+        // Register USDT if needed
+        if (!coin::is_account_registered<USDT>(trader)) {
+            coin::register<USDT>(account);
+        };
+
+        // Mint USDT to user
+        let usdt_caps = borrow_global<TokenCapabilities<USDT>>(@arbitrage);
+        let usdt_coins = coin::mint<USDT>(usdt_amount, &usdt_caps.mint_cap);
+        coin::deposit(trader, usdt_coins);
+
+        event::emit(SwapEvent {
+            trader,
+            from_token: b"VAULT_USDT",
+            to_token: b"USDT",
+            amount_in: usdt_amount,
+            amount_out: usdt_amount,
             timestamp: timestamp::now_seconds(),
         });
     }

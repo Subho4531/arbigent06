@@ -4,13 +4,26 @@ import { Bot, Shield, Target, TrendingUp, ArrowRight, Zap, Radio } from "lucide-
 import Header from "@/components/Header";
 import FeatureCard from "@/components/FeatureCard";
 import PriceChart from "@/components/PriceChart";
+import { WalletConnectionPrompt } from "@/components/WalletConnectionPrompt";
 import { Button } from "@/components/ui/button";
+import { useWallet } from "@/contexts/WalletContext";
+import { useState } from "react";
 
 const Index = () => {
   const navigate = useNavigate();
+  const { connected } = useWallet();
+  const [showWalletPrompt, setShowWalletPrompt] = useState(false);
 
   const handleConnect = () => {
-    navigate("/dashboard");
+    if (connected) {
+      navigate("/dashboard");
+    } else {
+      setShowWalletPrompt(true);
+    }
+  };
+
+  const handleCloseWalletPrompt = () => {
+    setShowWalletPrompt(false);
   };
 
   const features = [
@@ -46,7 +59,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background noise-overlay dark">
-      <Header onConnect={handleConnect} />
+      <Header />
       
       {/* Hero Section */}
       <section className="relative pt-28 pb-20 lg:pt-36 lg:pb-32">
@@ -84,7 +97,7 @@ const Index = () => {
                 
                 <div className="flex flex-col sm:flex-row gap-4">
                   <Button variant="hero" size="xl" onClick={handleConnect}>
-                    Launch App
+                    {connected ? 'Launch App' : 'Connect Wallet'}
                     <ArrowRight className="h-5 w-5" />
                   </Button>
                   <Button variant="outline" size="xl" className="font-display tracking-wide font-bold">
@@ -213,7 +226,7 @@ const Index = () => {
                 Connect your Petra wallet and deploy your first autonomous trading agent in minutes.
               </p>
               <Button variant="glow" size="xl" onClick={handleConnect} className="font-display tracking-wide font-bold">
-                Connect Petra Wallet
+                {connected ? 'Launch App' : 'Connect Petra Wallet'}
                 <ArrowRight className="h-5 w-5" />
               </Button>
               <p className="text-sm text-muted-foreground mt-4">No trading fees for first 30 days</p>
@@ -236,6 +249,25 @@ const Index = () => {
           </div>
         </div>
       </footer>
+
+      {/* Wallet Connection Modal */}
+      {showWalletPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="relative max-w-md w-full">
+            <button
+              onClick={handleCloseWalletPrompt}
+              className="absolute -top-2 -right-2 z-10 h-8 w-8 rounded-full bg-background border border-border flex items-center justify-center hover:bg-muted transition-colors"
+            >
+              ×
+            </button>
+            <WalletConnectionPrompt
+              title="Connect to Start Trading"
+              description="Connect your Petra wallet to access the dashboard and start deploying autonomous trading agents."
+              targetRoute="/dashboard"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
