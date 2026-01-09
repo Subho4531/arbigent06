@@ -33,7 +33,7 @@ const AnimatedBackground = () => (
 );
 
 const Agents = () => {
-  const [minProfit, setMinProfit] = useState([0.00001]);
+  const [minProfit, setMinProfit] = useState([0.0001]);
   const [selectedPair, setSelectedPair] = useState("AUTO");
   const [riskLevel, setRiskLevel] = useState<RiskLevel>("MEDIUM");
   const [vaultBalances, setVaultBalances] = useState<VaultTokenBalance[]>([]);
@@ -197,6 +197,119 @@ const Agents = () => {
             </Link>
           </motion.div>
 
+          {/* Active Agents Status - New Section */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="mb-6"
+          >
+            <div className="rounded-xl border border-border bg-card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-display text-xl font-bold tracking-wide text-foreground flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-primary" />
+                  ACTIVE AGENTS
+                </h2>
+                <div className="flex items-center gap-2">
+                  {isRunning && (
+                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-success/20 border border-success/30">
+                      <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+                      <span className="text-xs font-mono text-success">RUNNING</span>
+                    </div>
+                  )}
+                  <span className="text-sm text-muted-foreground">
+                    {isRunning ? '1 Active' : '0 Active'}
+                  </span>
+                </div>
+              </div>
+              
+              {isRunning ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Agent Status Card */}
+                  <div className="rounded-lg border border-border bg-background/50 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-success animate-pulse" />
+                        <span className="font-display font-bold text-foreground">ArbiGent #1</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">Running: {runningDuration}</span>
+                    </div>
+                    
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Strategy:</span>
+                        <span className="font-mono text-foreground">{selectedPair}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Risk Level:</span>
+                        <span className="font-mono text-foreground">{riskLevel}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Min Profit:</span>
+                        <span className="font-mono text-foreground">{minProfit[0].toFixed(4)}%</span>
+                      </div>
+                    </div>
+                    
+                    {/* Performance Metrics */}
+                    <div className="mt-4 pt-3 border-t border-border">
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Profit</p>
+                          <p className="font-mono font-bold text-success">+${agentState.totalProfit.toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Trades</p>
+                          <p className="font-mono font-bold text-foreground">{agentState.tradesExecuted}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Success</p>
+                          <p className="font-mono font-bold text-primary">
+                            {agentState.tradesExecuted > 0 
+                              ? ((agentState.tradesExecuted / (agentState.tradesExecuted + agentState.tradesSkipped)) * 100).toFixed(0)
+                              : 0}%
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Recent Activity */}
+                  <div className="rounded-lg border border-border bg-background/50 p-4">
+                    <h3 className="font-display font-bold text-foreground mb-3">Recent Activity</h3>
+                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                      {logs.slice(-4).reverse().map((log, index) => (
+                        <div key={index} className="flex items-start gap-2 text-xs">
+                          <span className="text-muted-foreground whitespace-nowrap">[{log.time}]</span>
+                          <span className={`font-mono ${
+                            log.type === 'SUCCESS' ? 'text-success' :
+                            log.type === 'ERROR' ? 'text-destructive' :
+                            log.type === 'WARNING' ? 'text-warning' :
+                            log.type === 'SCAN' ? 'text-primary' :
+                            'text-muted-foreground'
+                          }`}>
+                            {log.type}
+                          </span>
+                          <span className="text-foreground truncate">{log.message}</span>
+                        </div>
+                      ))}
+                      {logs.length === 0 && (
+                        <p className="text-xs text-muted-foreground text-center py-2">No activity yet</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted/50 mx-auto mb-4">
+                    <Shield className="h-8 w-8 text-muted-foreground" />
+                  </div>
+                  <p className="text-muted-foreground mb-2">No active agents</p>
+                  <p className="text-xs text-muted-foreground">Start an agent to begin autonomous trading</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+
           {/* Vault Balances - Top Section */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -268,19 +381,19 @@ const Agents = () => {
                   <Slider
                     value={minProfit}
                     onValueChange={setMinProfit}
-                    min={0.00001}
-                    max={5}
-                    step={0.00001}
+                    min={0.0001}
+                    max={2}
+                    step={0.0001}
                     className="mb-2"
                     disabled={isRunning}
                   />
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Min: 0.00001%</span>
-                    <span className="font-mono font-semibold text-primary">{minProfit[0].toFixed(5)}%</span>
-                    <span className="text-muted-foreground">Max: 5.0%</span>
+                    <span className="text-muted-foreground">Min: 0.0001%</span>
+                    <span className="font-mono font-semibold text-primary">{minProfit[0].toFixed(4)}%</span>
+                    <span className="text-muted-foreground">Max: 2.0%</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-2">
-                    Only execute trades with profit ≥ {minProfit[0].toFixed(5)}%
+                    Only execute trades with profit ≥ {minProfit[0].toFixed(4)}%
                   </p>
                 </div>
                 

@@ -107,9 +107,6 @@ const Index = () => {
                     {connected ? 'Launch App' : 'Connect Wallet'}
                     <ArrowRight className="h-5 w-5" />
                   </Button>
-                  <Button variant="outline" size="xl" className="font-display tracking-wide font-bold">
-                    Learn More
-                  </Button>
                 </div>
               </motion.div>
               
@@ -136,12 +133,12 @@ const Index = () => {
                 transition={{ duration: 0.6, delay: 0.4 }}
                 className="mt-6 grid grid-cols-2 gap-4"
               >
-                <div className="rounded-xl border border-border bg-card/60 backdrop-blur-sm p-4">
+                <div className="rounded-xl border border-border bg-background/50 backdrop-blur-sm p-4">
                   <p className="text-xs text-muted-foreground mb-1 font-display">Active Arbitrage Routes</p>
                   <p className="font-mono text-xl font-bold text-foreground">47</p>
                   <p className="text-xs text-success mt-1">+12 new today</p>
                 </div>
-                <div className="rounded-xl border border-border bg-card/60 backdrop-blur-sm p-4">
+                <div className="rounded-xl border border-border bg-background/50 backdrop-blur-sm p-4">
                   <p className="text-xs text-muted-foreground mb-1 font-display">Total Value Locked</p>
                   <p className="font-mono text-xl font-bold text-foreground">$2.4M</p>
                   <p className="text-xs text-success mt-1">+8.3% this week</p>
@@ -200,7 +197,7 @@ const Index = () => {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.5, delay: index * 0.1 }}
-                className="group rounded-xl border border-border bg-card p-6 hover:border-primary/50 transition-all duration-300"
+                className="group rounded-xl border border-border bg-background/30 backdrop-blur-sm p-6 hover:border-primary/50 transition-all duration-300"
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 border border-primary/20 mb-4">
                   <item.icon className="h-6 w-6 text-primary" />

@@ -41,54 +41,47 @@ export interface AgentState {
 }
 
 // Triangular arbitrage routes
-// Pattern: from_token → mid_token → from_token (circular, profit in from_token)
+// AUTO mode: switches chains (USDC→APT→USDC, then APT→USDT→APT, etc.)
+// Specific pairs: stay on same route (USDC→APT always does USDC→APT→USDC)
 interface ArbitrageRoute {
   name: string;
   fromToken: keyof VaultState;
   midToken: keyof VaultState;
-  toToken: keyof VaultState; // Same as fromToken for circular arbitrage
+  toToken: keyof VaultState; // Final token we receive
   apiFromToken: string;
   apiToToken: string;
 }
 
-// Routes: The "to" in pair name is the mid_token, we return to from_token
+// Routes for specific pair selections (non-circular, actual arbitrage)
 const ARBITRAGE_ROUTES: Record<string, ArbitrageRoute> = {
   'USDC_APT': {
-    name: 'USDC → APT → USDC',
+    name: 'USDC → USDT → APT',
     fromToken: 'USDC',
-    midToken: 'APT',
-    toToken: 'USDC', // Return to USDC
+    midToken: 'USDT', 
+    toToken: 'APT',   // We end up with APT
     apiFromToken: 'usdc',
     apiToToken: 'apt',
   },
   'APT_USDT': {
-    name: 'APT → USDT → APT',
+    name: 'APT → USDC → USDT',
     fromToken: 'APT',
-    midToken: 'USDT',
-    toToken: 'APT', // Return to APT
+    midToken: 'USDC',
+    toToken: 'USDT',  // We end up with USDT
     apiFromToken: 'apt',
     apiToToken: 'usdt',
   },
   'USDC_USDT': {
-    name: 'USDC → APT → USDC',
+    name: 'USDC → APT → USDT',
     fromToken: 'USDC',
     midToken: 'APT',
-    toToken: 'USDC', // Return to USDC
+    toToken: 'USDT',  // We end up with USDT
     apiFromToken: 'usdc',
     apiToToken: 'usdt',
   },
-  'USDT_USDC': {
-    name: 'USDT → APT → USDT',
-    fromToken: 'USDT',
-    midToken: 'APT',
-    toToken: 'USDT', // Return to USDT
-    apiFromToken: 'usdt',
-    apiToToken: 'usdc',
-  },
 };
 
-// All routes for AUTO mode
-const AUTO_ROUTES = ['USDC_APT', 'APT_USDT', 'USDC_USDT', 'USDT_USDC'];
+// All routes for AUTO mode - cycles through different chains
+const AUTO_ROUTES = ['USDC_APT', 'APT_USDT', 'USDC_USDT'];
 
 // Minimum token balance to continue trading (in USD)
 const MIN_BALANCE_USD = 0.10;
@@ -129,7 +122,7 @@ class ArbiGentService {
   };
 
   private config: AgentConfig = {
-    minProfitThreshold: 0.00001,
+    minProfitThreshold: 0.0001,
     riskTolerance: 'MEDIUM',
     selectedPair: 'AUTO',
     maxTradeCap: 5000,
@@ -241,7 +234,7 @@ class ArbiGentService {
       `Risk: ${this.config.riskTolerance} | Min Profit: ${this.config.minProfitThreshold}%`
     );
     this.addLog('INFO', 'Strategy', 
-      'Start at 10% → If profitable, switch to 50% → Continue until unprofitable'
+      `AUTO: Switch chains | Specific: Stay on route | Start 10% → 50% if profitable`
     );
     
     this.runLoop();
@@ -450,42 +443,46 @@ class ArbiGentService {
     // Get prices
     const fromPrice = this.livePrices[route.fromToken] || 1;
     const midPrice = this.livePrices[route.midToken] || 1;
+    const toPrice = this.livePrices[route.toToken] || 1;
 
-    // Calculate token amounts
+    // Calculate token flow: from_token → mid_token → to_token
     // Step 1: from_token → mid_token
     const fromTokenAmount = tradeAmountUsd / fromPrice;
     const midTokenAmount = (fromTokenAmount * fromPrice) / midPrice;
     
-    // Step 2: mid_token → from_token (circular arbitrage returns to from_token)
-    // Final amount = initial + profit
+    // Step 2: mid_token → to_token (includes profit)
     const finalValueUsd = tradeAmountUsd + profitUsd;
-    const returnedFromTokenAmount = finalValueUsd / fromPrice;
+    const toTokenAmount = finalValueUsd / toPrice;
 
-    this.addLog('SUCCESS', '⚡ EXECUTING TRADE', route.name);
+    this.addLog('SUCCESS', '⚡ EXECUTING ARBITRAGE', route.name);
 
     this.addLog('INFO', 'Token Flow', 
-      `${route.fromToken}: ${fromTokenAmount.toFixed(6)} → ${route.midToken}: ${midTokenAmount.toFixed(6)} → ${route.fromToken}: ${returnedFromTokenAmount.toFixed(6)}`
+      `${route.fromToken}: -${fromTokenAmount.toFixed(6)} → ${route.midToken}: ${midTokenAmount.toFixed(6)} → ${route.toToken}: +${toTokenAmount.toFixed(6)}`
     );
 
     this.addLog('INFO', 'Cost Breakdown', 
       `Gas: $${gasCostUsd.toFixed(4)} | Slippage: $${slippageCostUsd.toFixed(4)} | Total: $${totalCostUsd.toFixed(4)}`
     );
 
-    // Update local vault - circular arbitrage: deduct original, add returned amount
-    // Net change = returnedFromTokenAmount - fromTokenAmount (which equals profit in token terms)
-    const netTokenChange = returnedFromTokenAmount - fromTokenAmount;
-    const oldBalance = this.vaultBalances[route.fromToken];
-    this.vaultBalances[route.fromToken] = oldBalance + netTokenChange;
+    // Update local vault balances
+    const oldFromBalance = this.vaultBalances[route.fromToken];
+    const oldToBalance = this.vaultBalances[route.toToken];
+    
+    // Deduct from_token
+    this.vaultBalances[route.fromToken] = Math.max(0, oldFromBalance - fromTokenAmount);
+    
+    // Add to_token
+    this.vaultBalances[route.toToken] = oldToBalance + toTokenAmount;
 
     this.addLog('SUCCESS', 'Vault Updated', 
-      `${route.fromToken}: ${oldBalance.toFixed(6)} → ${this.vaultBalances[route.fromToken].toFixed(6)} (${netTokenChange >= 0 ? '+' : ''}${netTokenChange.toFixed(6)})`
+      `${route.fromToken}: ${oldFromBalance.toFixed(6)} → ${this.vaultBalances[route.fromToken].toFixed(6)} | ${route.toToken}: ${oldToBalance.toFixed(6)} → ${this.vaultBalances[route.toToken].toFixed(6)}`
     );
 
-    // Update MongoDB vault
-    await this.updateMongoDBVault(route.fromToken, netTokenChange);
+    // Update vault - deduct from_token and add to_token
+    await this.updateVault(route, fromTokenAmount, toTokenAmount);
 
     this.addLog('SUCCESS', 'Trade Complete', 
-      `Invested: $${tradeAmountUsd.toFixed(4)} | Returned: $${finalValueUsd.toFixed(4)} | Profit: +$${profitUsd.toFixed(4)} (${profitability.profit_margin_percent.toFixed(4)}%)`
+      `Invested: $${tradeAmountUsd.toFixed(4)} | Received: $${finalValueUsd.toFixed(4)} | Profit: +$${profitUsd.toFixed(4)} (${profitability.profit_margin_percent.toFixed(4)}%)`
     );
 
     // Update state
@@ -505,33 +502,57 @@ class ArbiGentService {
     );
   }
 
-  // Update MongoDB vault - add profit to from_token (circular arbitrage)
-  private async updateMongoDBVault(token: keyof VaultState, netChange: number) {
+  // Update vault - deduct from_token and add to_token
+  private async updateVault(route: ArbitrageRoute, fromAmount: number, toAmount: number) {
     if (!this.walletAddress) {
-      this.addLog('WARNING', 'MongoDB Skip', 'No wallet address');
+      this.addLog('WARNING', 'Vault Update Skipped', 'No wallet address');
       return;
     }
 
-    if (Math.abs(netChange) < 0.000001) {
-      return; // Skip tiny changes
-    }
-
     try {
-      const decimals = token === 'APT' ? 8 : 6;
-      const amountSmallest = Math.abs(Math.floor(netChange * Math.pow(10, decimals))).toString();
-      const txHash = `0x${Date.now().toString(16)}${Math.random().toString(16).substr(2, 48)}`;
+      // Get decimals for each token
+      const fromDecimals = route.fromToken === 'APT' ? 8 : 6;
+      const toDecimals = route.toToken === 'APT' ? 8 : 6;
 
-      if (netChange > 0) {
-        // Deposit (profit)
-        await apiService.depositToVault(this.walletAddress, token, amountSmallest, txHash);
-        this.addLog('INFO', 'MongoDB: Deposited', `${token}: +${netChange.toFixed(6)}`);
-      } else {
-        // Withdraw (loss - shouldn't happen in profitable trade)
-        await apiService.withdrawFromVault(this.walletAddress, token, amountSmallest, txHash);
-        this.addLog('INFO', 'MongoDB: Withdrawn', `${token}: ${netChange.toFixed(6)}`);
+      // Convert to smallest units
+      const fromAmountSmallest = Math.floor(fromAmount * Math.pow(10, fromDecimals)).toString();
+      const toAmountSmallest = Math.floor(toAmount * Math.pow(10, toDecimals)).toString();
+
+      // Generate mock transaction hashes
+      const txHashBase = `0x${Date.now().toString(16)}${Math.random().toString(16).substr(2, 40)}`;
+
+      // Withdraw from_token (deduct from vault)
+      const withdrawResponse = await apiService.withdrawFromVault(
+        this.walletAddress,
+        route.fromToken,
+        fromAmountSmallest,
+        txHashBase + '_withdraw'
+      );
+
+      if (withdrawResponse.success) {
+        this.addLog('INFO', 'Vault: Deducted', 
+          `${route.fromToken}: -${fromAmount.toFixed(6)}`
+        );
       }
+
+      // Deposit to_token (add to vault)
+      const depositResponse = await apiService.depositToVault(
+        this.walletAddress,
+        route.toToken,
+        toAmountSmallest,
+        txHashBase + '_deposit'
+      );
+
+      if (depositResponse.success) {
+        this.addLog('INFO', 'Vault: Added', 
+          `${route.toToken}: +${toAmount.toFixed(6)}`
+        );
+      }
+
+      this.addLog('SUCCESS', 'Vault Synced', 'Balances updated in database');
+
     } catch (error) {
-      this.addLog('ERROR', 'MongoDB Error', error instanceof Error ? error.message : 'Unknown');
+      this.addLog('ERROR', 'Vault Update Failed', error instanceof Error ? error.message : 'Unknown');
     }
   }
 

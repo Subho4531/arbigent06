@@ -106,6 +106,38 @@ export interface MarketData {
   data_source: string;
 }
 
+// Arbitrage opportunities response interface
+export interface ArbitrageOpportunitiesResponse {
+  status: string;
+  timestamp: string;
+  search_parameters: {
+    trade_amount: number;
+    pairs_checked: number;
+    available_dexs: string[];
+    current_prices: {
+      apt: number;
+      usdc: number;
+      usdt: number;
+    };
+  };
+  opportunities: {
+    total_found: number;
+    profitable_count: number;
+    top_opportunities: ArbitrageOpportunity[];
+  };
+  market_summary: {
+    best_profit_margin: number;
+    average_profit_margin: number;
+    recommended_trades: number;
+  };
+  investment_details: {
+    amount_apt?: number;
+    amount_usd: number;
+    apt_price_used: number;
+    dex_fees_applied: boolean;
+  };
+  enhanced_analysis: boolean;
+}
 // Arbitrage opportunity interface
 export interface ArbitrageOpportunity {
   route: {
@@ -124,21 +156,25 @@ export interface ArbitrageOpportunity {
     profit_margin_percent: number;
     roi_percent: number;
   };
-  charges: {
-    dex_fees: {
+  charges?: {
+    dex_fees?: {
       from_dex_fee_percent: number;
       to_dex_fee_percent: number;
       from_fee_amount_usd: number;
       to_fee_amount_usd: number;
       total_trading_fees_usd: number;
     };
-    gas_fees: {
+    gas_fees?: {
       total_gas_cost_apt: number;
       total_gas_cost_usd: number;
     };
-    slippage: {
+    slippage?: {
       estimated_slippage_percent: number;
       estimated_slippage_cost_usd: number;
+    };
+    total_costs?: {
+      total_fees_usd: number;
+      cost_percentage: number;
     };
   };
   recommendation: string;
@@ -350,7 +386,9 @@ class ApiService {
     amount_usd?: number;
     amount_apt?: number;
     dex_fees?: Record<string, number>;
-  }): Promise<ApiResponse<{ opportunities: { top_opportunities: ArbitrageOpportunity[] } }>> {
+    current_prices?: Array<Record<string, string>>;
+    apt_price?: string;
+  }): Promise<ApiResponse<ArbitrageOpportunitiesResponse>> {
     try {
       const response = await fetch(`${ARBITRAGE_API_BASE_URL}/arbitrage/possibilities`, {
         method: 'POST',

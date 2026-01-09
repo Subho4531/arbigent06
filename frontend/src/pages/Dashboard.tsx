@@ -67,7 +67,7 @@ const Dashboard = () => {
       route: `${opp.route.from_dex} → ${opp.route.to_dex}`,
       spread: `${opp.profitability.price_difference_percent.toFixed(2)}%`,
       profit: `$${opp.profitability.net_profit_usd.toFixed(2)}`,
-      gas: `${opp.charges.gas_fees.total_gas_cost_apt.toFixed(3)} APT`,
+      gas: `${(opp.charges?.gas_fees?.total_gas_cost_apt || 0).toFixed(3)} APT`,
       risk: opp.risk_level.toUpperCase(),
       isExecutable: opp.profitability.is_profitable && opp.profitability.net_profit_usd > 1
     };

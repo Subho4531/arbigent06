@@ -115,18 +115,37 @@ export const useMarketData = (refreshInterval: number = 5000): UseMarketDataRetu
 
   const fetchOpportunities = useCallback(async () => {
     try {
+      // Use current token prices for more accurate opportunities
+      const currentPrices = [
+        {
+          apt: tokenPrices.APT?.priceNum?.toString() || "12.45",
+          usdc: tokenPrices.USDC?.priceNum?.toString() || "1.0",
+          usdt: tokenPrices.USDT?.priceNum?.toString() || "0.999"
+        }
+      ];
+
       const response = await apiService.findArbitrageOpportunities({
         trade_amount: 1000,
-        dex_fees: { 'Smart Contract': 0.30 }
+        dex_fees: { 'Smart Contract': 0.30 },
+        current_prices: currentPrices,
+        apt_price: tokenPrices.APT?.priceNum?.toString() || "12.45"
       });
       
       if (response.success && response.data?.opportunities?.top_opportunities) {
-        setOpportunities(response.data.opportunities.top_opportunities);
+        // Filter for profitable opportunities only
+        const profitableOpportunities = response.data.opportunities.top_opportunities.filter(
+          opp => opp.profitability.is_profitable && opp.profitability.profit_margin_percent > 0
+        );
+        setOpportunities(profitableOpportunities);
+      } else {
+        console.warn('No opportunities found or API error:', response.error);
+        setOpportunities([]);
       }
     } catch (err) {
       console.error('Opportunities fetch error:', err);
+      setOpportunities([]);
     }
-  }, []);
+  }, [tokenPrices]);
 
   const refreshMarketData = useCallback(async () => {
     setIsLoading(true);
@@ -141,15 +160,26 @@ export const useMarketData = (refreshInterval: number = 5000): UseMarketDataRetu
 
   useEffect(() => {
     fetchMarketData();
-    fetchOpportunities();
-  }, [fetchMarketData, fetchOpportunities]);
+  }, [fetchMarketData]);
+
+  // Fetch opportunities after market data is loaded
+  useEffect(() => {
+    if (tokenPrices.APT?.priceNum) {
+      fetchOpportunities();
+    }
+  }, [fetchOpportunities, tokenPrices.APT?.priceNum]);
 
   useEffect(() => {
     if (refreshInterval > 0) {
-      const interval = setInterval(fetchMarketData, refreshInterval);
-      return () => clearInterval(interval);
+      const marketInterval = setInterval(fetchMarketData, refreshInterval);
+      const opportunitiesInterval = setInterval(fetchOpportunities, refreshInterval * 2); // Refresh opportunities less frequently
+      
+      return () => {
+        clearInterval(marketInterval);
+        clearInterval(opportunitiesInterval);
+      };
     }
-  }, [fetchMarketData, refreshInterval]);
+  }, [fetchMarketData, fetchOpportunities, refreshInterval]);
 
   return {
     marketData,
