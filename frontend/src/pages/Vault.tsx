@@ -15,12 +15,13 @@ import { balanceService } from "@/services/BalanceService";
 
 const Vault = () => {
   const { account, connected } = useWallet();
-  const { vault, balances, transactions, isLoading, error, refreshVault, deposit, withdraw, getFormattedBalance } = useVault();
+  const { vault, balances, transactions, isLoading, error, refreshVault, refreshTransactions, deposit, withdraw, getFormattedBalance } = useVault();
   const { tokenPrices } = useMarketData();
   const { 
     isProcessing: contractProcessing, 
     error: contractError, 
     depositAPTtoVault, 
+    depositAPTDirectToVault,
     depositTokenToVault,
     withdrawFromVault, 
     mintTestTokens,
@@ -118,8 +119,8 @@ const Vault = () => {
     
     try {
       if (selectedToken === 'APT') {
-        // For APT deposits, swap APT to USDC via smart contract
-        const success = await depositAPTtoVault(depositAmount, 'USDC');
+        // For APT deposits, deposit APT directly to vault (no conversion)
+        const success = await depositAPTDirectToVault(depositAmount);
         
         if (success) {
           setDepositAmount("");
@@ -127,6 +128,7 @@ const Vault = () => {
           const newBalances = await balanceService.refreshBalances(account.address);
           setWalletBalances(newBalances);
           await refreshVault();
+          await refreshTransactions(); // Refresh transaction history
         }
       } else if (selectedToken === 'USDC' || selectedToken === 'USDT') {
         // For USDC/USDT deposits, transfer tokens from wallet to vault
@@ -153,6 +155,7 @@ const Vault = () => {
           const newBalances = await balanceService.refreshBalances(account.address);
           setWalletBalances(newBalances);
           await refreshVault();
+          await refreshTransactions(); // Refresh transaction history
           
           setLocalError(null); // Clear any previous errors
         }
@@ -173,30 +176,16 @@ const Vault = () => {
     clearContractError();
     
     try {
-      if (selectedToken === 'USDC' || selectedToken === 'USDT') {
-        // Use smart contract for USDC/USDT withdrawals (burns tokens)
-        const success = await withdrawFromVault(withdrawAmount, selectedToken);
-        
-        if (success) {
-          setWithdrawAmount("");
-          // Refresh balances
-          const newBalances = await balanceService.refreshBalances(account.address);
-          setWalletBalances(newBalances);
-          await refreshVault();
-        }
-      } else {
-        // For APT withdrawals, use original logic
-        const decimals = selectedToken === 'APT' ? 8 : 6;
-        const amountInSmallestUnit = (parseFloat(withdrawAmount) * Math.pow(10, decimals)).toString();
-        const mockTxHash = `0x${Math.random().toString(16).substr(2, 64)}`;
-        
-        const success = await withdraw(selectedToken, amountInSmallestUnit, mockTxHash);
-        
-        if (success) {
-          setWithdrawAmount("");
-          const newBalances = await balanceService.refreshBalances(account.address);
-          setWalletBalances(newBalances);
-        }
+      // Use smart contract for all withdrawals (APT, USDC, USDT)
+      const success = await withdrawFromVault(withdrawAmount, selectedToken);
+      
+      if (success) {
+        setWithdrawAmount("");
+        // Refresh balances
+        const newBalances = await balanceService.refreshBalances(account.address);
+        setWalletBalances(newBalances);
+        await refreshVault();
+        await refreshTransactions(); // Refresh transaction history
       }
     } catch (err) {
       console.error('Withdraw error:', err);

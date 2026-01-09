@@ -6,7 +6,6 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    index: true,
     lowercase: true,
     validate: {
       validator: function(v) {
@@ -92,8 +91,7 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Indexes for performance
-userSchema.index({ walletAddress: 1 });
+// Indexes for performance (walletAddress already has unique: true which creates an index)
 userSchema.index({ 'stats.lastActiveAt': -1 });
 userSchema.index({ createdAt: -1 });
 
