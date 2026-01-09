@@ -188,6 +188,10 @@ app.post('/api/vault/deposit', async (req, res) => {
       return res.status(404).json({ error: 'Coin not found' });
     }
     
+    // Calculate formatted amount based on decimals
+    const decimals = coin.decimals || (coinSymbol.toUpperCase() === 'APT' ? 8 : 6);
+    const amountFormatted = parseFloat(amount) / Math.pow(10, decimals);
+    
     // Create transaction log
     const transactionLog = await TransactionLog.createLog({
       walletAddress,
@@ -196,7 +200,7 @@ app.post('/api/vault/deposit', async (req, res) => {
       status: 'confirmed',
       coinSymbol,
       amount: amount.toString(),
-      amountFormatted: parseFloat(amount),
+      amountFormatted: amountFormatted,
       smartContract: {
         contractAddress: coin.contractAddress,
         functionName: 'deposit',
@@ -249,7 +253,7 @@ app.post('/api/vault/withdraw', async (req, res) => {
     }
     
     // Check if sufficient balance
-    const currentBalance = BigInt(vault.getCoinBalance(coinSymbol));
+    const currentBalance = BigInt(vault.getCoinBalance(coinSymbol) || '0');
     const withdrawAmount = BigInt(amount);
     
     if (currentBalance < withdrawAmount) {
@@ -262,6 +266,10 @@ app.post('/api/vault/withdraw', async (req, res) => {
       return res.status(404).json({ error: 'Coin not found' });
     }
     
+    // Calculate formatted amount based on decimals
+    const decimals = coin.decimals || (coinSymbol.toUpperCase() === 'APT' ? 8 : 6);
+    const amountFormatted = parseFloat(amount) / Math.pow(10, decimals);
+    
     // Create transaction log
     const transactionLog = await TransactionLog.createLog({
       walletAddress,
@@ -270,7 +278,7 @@ app.post('/api/vault/withdraw', async (req, res) => {
       status: 'confirmed',
       coinSymbol,
       amount: amount.toString(),
-      amountFormatted: parseFloat(amount),
+      amountFormatted: amountFormatted,
       smartContract: {
         contractAddress: coin.contractAddress,
         functionName: 'withdraw',

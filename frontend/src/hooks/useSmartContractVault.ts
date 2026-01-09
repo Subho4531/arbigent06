@@ -25,8 +25,9 @@ export interface UseSmartContractVaultReturn {
   
   // Vault operations with smart contract integration
   depositAPTtoVault: (amount: string, targetToken: 'USDC' | 'USDT') => Promise<boolean>;
+  depositAPTDirectToVault: (amount: string) => Promise<boolean>; // Direct APT deposit without conversion
   depositTokenToVault: (amount: string, token: 'USDC' | 'USDT') => Promise<boolean>;
-  withdrawFromVault: (amount: string, sourceToken: 'USDC' | 'USDT') => Promise<boolean>;
+  withdrawFromVault: (amount: string, sourceToken: 'APT' | 'USDC' | 'USDT') => Promise<boolean>;
   
   // Token minting for testing
   mintTestTokens: (token: 'USDC' | 'USDT', amount: string) => Promise<boolean>;
@@ -135,7 +136,17 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       
       console.log(`🔥 Depositing ${token} to vault:`, { amount, tokenAmount });
 
-      // Use the new vault deposit functions that properly burn tokens
+      // Check wallet balance first
+      const walletBalance = await balanceService.fetchAllBalances(account.address);
+      const tokenBalance = parseFloat(walletBalance[token] || '0');
+      const depositAmountNum = parseFloat(amount);
+
+      if (depositAmountNum > tokenBalance) {
+        setError(`Insufficient ${token} balance. You have ${tokenBalance.toFixed(2)} ${token}`);
+        return false;
+      }
+
+      // Use the vault deposit functions that properly burn tokens
       const transaction: InputTransactionData = {
         data: {
           function: token === 'USDC'
@@ -169,6 +180,72 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
     } catch (err) {
       console.error(`❌ ${token} vault deposit error:`, err);
       setError(err instanceof Error ? err.message : `${token} vault deposit failed`);
+      return false;
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [connected, account, submitTransaction]);
+
+  // Deposit APT directly to vault (without conversion to USDC/USDT)
+  const depositAPTDirectToVault = useCallback(async (
+    amount: string
+  ): Promise<boolean> => {
+    if (!connected || !account?.address) {
+      setError('Wallet not connected');
+      return false;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      // Convert amount to smallest unit (APT has 8 decimals)
+      const aptAmount = (parseFloat(amount) * Math.pow(10, 8)).toString();
+      
+      console.log('🔥 Depositing APT directly to vault:', { amount, aptAmount });
+
+      // Check wallet balance first
+      const walletBalance = await balanceService.fetchAPTBalance(account.address);
+      const aptBalance = parseFloat(walletBalance || '0');
+      const depositAmountNum = parseFloat(amount);
+
+      if (depositAmountNum > aptBalance) {
+        setError(`Insufficient APT balance. You have ${aptBalance.toFixed(4)} APT`);
+        return false;
+      }
+
+      // Use the direct APT vault deposit function
+      const transaction: InputTransactionData = {
+        data: {
+          function: `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_apt_to_vault`,
+          functionArguments: [aptAmount],
+        },
+      };
+
+      console.log('📝 Submitting APT vault deposit transaction:', transaction);
+
+      const result = await submitTransaction(transaction);
+
+      if (result.success && result.hash) {
+        console.log('✅ APT vault deposit successful:', result.hash);
+
+        // Update vault balance in backend - record as APT
+        await apiService.depositToVault(
+          account.address,
+          'APT',
+          aptAmount,
+          result.hash
+        );
+
+        console.log('✅ APT vault balance updated in backend');
+        return true;
+      } else {
+        setError('APT vault deposit transaction failed');
+        return false;
+      }
+    } catch (err) {
+      console.error('❌ APT vault deposit error:', err);
+      setError(err instanceof Error ? err.message : 'APT vault deposit failed');
       return false;
     } finally {
       setIsProcessing(false);
@@ -217,7 +294,7 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
         
         console.log('💰 Expected vault increase:', targetAmount, targetToken);
 
-        // Update vault balance in backend
+        // Update vault balance in backend - record as the target token (USDC/USDT)
         await apiService.depositToVault(
           account.address,
           targetToken,
@@ -240,10 +317,10 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
     }
   }, [connected, account, submitTransaction]);
 
-  // Withdraw from vault (burns USDC/USDT and converts to APT)
+  // Withdraw from vault (mints tokens to wallet or transfers APT)
   const withdrawFromVault = useCallback(async (
     amount: string, 
-    sourceToken: 'USDC' | 'USDT'
+    sourceToken: 'APT' | 'USDC' | 'USDT'
   ): Promise<boolean> => {
     if (!connected || !account?.address) {
       setError('Wallet not connected');
@@ -254,17 +331,44 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
     setError(null);
 
     try {
-      // Convert amount to smallest unit (USDC/USDT have 6 decimals)
-      const tokenAmount = (parseFloat(amount) * Math.pow(10, 6)).toString();
+      // Convert amount to smallest unit
+      const decimals = sourceToken === 'APT' ? 8 : 6;
+      const tokenAmount = (parseFloat(amount) * Math.pow(10, decimals)).toString();
       
       console.log(`🔥 Withdrawing ${sourceToken} from vault:`, { amount, tokenAmount });
 
-      // Use the new vault withdrawal functions that properly mint tokens
+      // First, check vault balance from backend
+      const vaultResponse = await apiService.getUserVault(account.address);
+      if (!vaultResponse.success || !vaultResponse.data) {
+        setError('Failed to fetch vault balance');
+        return false;
+      }
+
+      const vaultBalance = vaultResponse.data.balances.find(
+        b => b.coinSymbol === sourceToken
+      );
+      const currentBalance = BigInt(vaultBalance?.balance || '0');
+      const withdrawAmountBigInt = BigInt(tokenAmount);
+
+      if (currentBalance < withdrawAmountBigInt) {
+        const formattedBalance = (Number(currentBalance) / Math.pow(10, decimals)).toFixed(decimals === 8 ? 4 : 2);
+        setError(`Insufficient vault balance. You have ${formattedBalance} ${sourceToken}`);
+        return false;
+      }
+
+      // Use the appropriate vault withdrawal function
+      let functionName: string;
+      if (sourceToken === 'APT') {
+        functionName = `${CONTRACT_ADDRESS}::${MODULE_NAME}::withdraw_apt_from_vault`;
+      } else if (sourceToken === 'USDC') {
+        functionName = `${CONTRACT_ADDRESS}::${MODULE_NAME}::withdraw_usdc_from_vault`;
+      } else {
+        functionName = `${CONTRACT_ADDRESS}::${MODULE_NAME}::withdraw_usdt_from_vault`;
+      }
+
       const transaction: InputTransactionData = {
         data: {
-          function: sourceToken === 'USDC'
-            ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::withdraw_usdc_from_vault`
-            : `${CONTRACT_ADDRESS}::${MODULE_NAME}::withdraw_usdt_from_vault`,
+          function: functionName,
           functionArguments: [tokenAmount],
         },
       };
@@ -493,6 +597,7 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
     isProcessing,
     error,
     depositAPTtoVault,
+    depositAPTDirectToVault,
     depositTokenToVault,
     withdrawFromVault,
     mintTestTokens,

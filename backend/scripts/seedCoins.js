@@ -38,7 +38,7 @@ const seedCoins = async () => {
       {
         symbol: 'USDC',
         name: 'USD Coin',
-        contractAddress: '0x851c087b280c6853667631d72147716d15276a7383608257ca9736eb01cd6af9',
+        contractAddress: '0x851c087b280c6853667631d72147716d15276a7383608257ca9736eb01cd6af9::swap::USDC',
         coinType: '0x851c087b280c6853667631d72147716d15276a7383608257ca9736eb01cd6af9::swap::USDC',
         decimals: 6,
         totalSupply: '50000000000000', // 50B USDC
@@ -59,7 +59,7 @@ const seedCoins = async () => {
       {
         symbol: 'USDT',
         name: 'Tether USD',
-        contractAddress: '0x851c087b280c6853667631d72147716d15276a7383608257ca9736eb01cd6af9',
+        contractAddress: '0x851c087b280c6853667631d72147716d15276a7383608257ca9736eb01cd6af9::swap::USDT',
         coinType: '0x851c087b280c6853667631d72147716d15276a7383608257ca9736eb01cd6af9::swap::USDT',
         decimals: 6,
         totalSupply: '80000000000000', // 80B USDT
