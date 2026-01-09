@@ -1,5 +1,5 @@
 // ArbiGent - Autonomous Arbitrage Agent Service
-// Smart Progressive Allocation with Triangular Arbitrage Routes
+// Triangular Arbitrage: from_token → mid_token → from_token (profit in from_token)
 import { apiService, ArbitrageOpportunity } from './ApiService';
 
 export type LogType = 'INFO' | 'SCAN' | 'EXECUTE' | 'WARNING' | 'ERROR' | 'SUCCESS';
@@ -41,57 +41,57 @@ export interface AgentState {
 }
 
 // Triangular arbitrage routes
-// Each route: from_token → mid_token → to_token (back to from_token type for profit)
+// Pattern: from_token → mid_token → from_token (circular, profit in from_token)
 interface ArbitrageRoute {
   name: string;
   fromToken: keyof VaultState;
   midToken: keyof VaultState;
-  toToken: keyof VaultState;
+  toToken: keyof VaultState; // Same as fromToken for circular arbitrage
   apiFromToken: string;
   apiToToken: string;
 }
 
+// Routes: The "to" in pair name is the mid_token, we return to from_token
 const ARBITRAGE_ROUTES: Record<string, ArbitrageRoute> = {
   'USDC_APT': {
-    name: 'USDC → USDT → APT',
+    name: 'USDC → APT → USDC',
     fromToken: 'USDC',
-    midToken: 'USDT',
-    toToken: 'APT',
+    midToken: 'APT',
+    toToken: 'USDC', // Return to USDC
     apiFromToken: 'usdc',
     apiToToken: 'apt',
   },
   'APT_USDT': {
-    name: 'APT → USDC → USDT',
+    name: 'APT → USDT → APT',
     fromToken: 'APT',
-    midToken: 'USDC',
-    toToken: 'USDT',
+    midToken: 'USDT',
+    toToken: 'APT', // Return to APT
     apiFromToken: 'apt',
     apiToToken: 'usdt',
   },
   'USDC_USDT': {
-    name: 'USDC → APT → USDT',
+    name: 'USDC → APT → USDC',
     fromToken: 'USDC',
     midToken: 'APT',
-    toToken: 'USDT',
+    toToken: 'USDC', // Return to USDC
     apiFromToken: 'usdc',
     apiToToken: 'usdt',
   },
+  'USDT_USDC': {
+    name: 'USDT → APT → USDT',
+    fromToken: 'USDT',
+    midToken: 'APT',
+    toToken: 'USDT', // Return to USDT
+    apiFromToken: 'usdt',
+    apiToToken: 'usdc',
+  },
 };
 
-// All routes for AUTO mode - cycle through each
-const AUTO_ROUTES = ['USDC_APT', 'APT_USDT', 'USDC_USDT'];
+// All routes for AUTO mode
+const AUTO_ROUTES = ['USDC_APT', 'APT_USDT', 'USDC_USDT', 'USDT_USDC'];
 
-// Progressive allocation steps
-const ALLOCATION_STEPS = [0.10, 0.50];
-
-// Simulated liquidity pools
-const LIQUIDITY_POOLS = [
-  { name: 'PancakeSwap', tvl: '45.2M', fee: '0.25%' },
-  { name: 'LiquidSwap', tvl: '32.8M', fee: '0.30%' },
-  { name: 'Pontem', tvl: '18.5M', fee: '0.20%' },
-  { name: 'Thala', tvl: '28.1M', fee: '0.25%' },
-  { name: 'Sushi', tvl: '12.3M', fee: '0.30%' },
-];
+// Minimum token balance to continue trading (in USD)
+const MIN_BALANCE_USD = 0.10;
 
 // Risk level constraints
 const RISK_CONSTRAINTS: Record<RiskLevel, { maxTrade: number; gasLimit: number }> = {
@@ -110,6 +110,10 @@ class ArbiGentService {
   private onVaultUpdateCallback: ((balances: VaultState) => void) | null = null;
   private currentAutoRouteIndex = 0;
   private walletAddress: string | null = null;
+  
+  // Track current allocation - starts at 10%, goes to 50% on success
+  private currentAllocationPercent = 0.10;
+  private consecutiveFailures = 0;
   
   private state: AgentState = {
     isRunning: false,
@@ -213,19 +217,18 @@ class ArbiGentService {
     }
   }
 
-  private getRandomPool() {
-    return LIQUIDITY_POOLS[Math.floor(Math.random() * LIQUIDITY_POOLS.length)];
-  }
-
   async start() {
     if (this.isRunning) return;
     
     this.isRunning = true;
     this.currentAutoRouteIndex = 0;
+    this.currentAllocationPercent = 0.10; // Start at 10%
+    this.consecutiveFailures = 0;
+    
     this.updateState({
       isRunning: true,
       startTime: new Date(),
-      currentAllocation: this.config.allocationPercent,
+      currentAllocation: 0.10,
       totalGasFees: 0,
       totalSlippage: 0,
       totalCosts: 0,
@@ -234,9 +237,12 @@ class ArbiGentService {
       tradesSkipped: 0,
     });
     
-    this.addLog('INFO', 'ArbiGent started', `Config: ${this.config.riskTolerance} risk, ${this.config.minProfitThreshold}% min profit`);
-    this.addLog('INFO', 'Triangular Arbitrage Routes', 'USDC→USDT→APT | APT→USDC→USDT | USDC→APT→USDT');
-    this.addLog('INFO', 'Allocation Strategy', 'Testing 10% then 50% for each route');
+    this.addLog('INFO', 'ArbiGent Started', 
+      `Risk: ${this.config.riskTolerance} | Min Profit: ${this.config.minProfitThreshold}%`
+    );
+    this.addLog('INFO', 'Strategy', 
+      'Start at 10% → If profitable, switch to 50% → Continue until unprofitable'
+    );
     
     this.runLoop();
   }
@@ -250,7 +256,7 @@ class ArbiGentService {
     }
     
     this.updateState({ isRunning: false });
-    this.addLog('INFO', 'ArbiGent stopped', 
+    this.addLog('INFO', 'ArbiGent Stopped', 
       `Profit: $${this.state.totalProfit.toFixed(4)} | Trades: ${this.state.tradesExecuted} | Gas: $${this.state.totalGasFees.toFixed(4)}`
     );
   }
@@ -261,117 +267,161 @@ class ArbiGentService {
     try {
       await this.executeCycle();
     } catch (error) {
-      this.addLog('ERROR', 'Cycle error', error instanceof Error ? error.message : 'Unknown error');
+      this.addLog('ERROR', 'Cycle Error', error instanceof Error ? error.message : 'Unknown error');
     }
 
-    const delay = 3000 + Math.random() * 3000;
-    this.loopInterval = setTimeout(() => this.runLoop(), delay);
+    // Continue if still running
+    if (this.isRunning) {
+      const delay = 3000 + Math.random() * 3000;
+      this.loopInterval = setTimeout(() => this.runLoop(), delay);
+    }
   }
 
   private async executeCycle() {
-    // Log prices
-    this.addLog('INFO', 'Live Price Check', 
-      `APT $${this.livePrices.APT?.toFixed(4) || '0'} | USDC $${this.livePrices.USDC?.toFixed(4) || '1'} | USDT $${this.livePrices.USDT?.toFixed(4) || '1'}`
+    // Log current prices
+    this.addLog('INFO', 'Price Check', 
+      `APT: $${this.livePrices.APT?.toFixed(4)} | USDC: $${this.livePrices.USDC?.toFixed(4)} | USDT: $${this.livePrices.USDT?.toFixed(4)}`
     );
 
-    // Log vault
-    this.addLog('INFO', 'Vault Status', 
+    // Log vault status
+    this.addLog('INFO', 'Vault Balance', 
       `APT: ${this.vaultBalances.APT.toFixed(4)} | USDC: ${this.vaultBalances.USDC.toFixed(4)} | USDT: ${this.vaultBalances.USDT.toFixed(4)}`
     );
 
-    // Determine which routes to check
-    let routesToCheck: string[] = [];
-    
+    // Get the route to check
+    let routeKey: string;
     if (this.config.selectedPair === 'AUTO') {
-      // In AUTO mode, cycle through all routes one by one
-      routesToCheck = [AUTO_ROUTES[this.currentAutoRouteIndex]];
+      routeKey = AUTO_ROUTES[this.currentAutoRouteIndex];
       this.currentAutoRouteIndex = (this.currentAutoRouteIndex + 1) % AUTO_ROUTES.length;
     } else {
-      routesToCheck = [this.config.selectedPair];
+      routeKey = this.config.selectedPair;
     }
 
-    // Check each route
-    for (const routeKey of routesToCheck) {
-      const route = ARBITRAGE_ROUTES[routeKey];
-      if (!route) continue;
+    const route = ARBITRAGE_ROUTES[routeKey];
+    if (!route) {
+      this.addLog('ERROR', 'Invalid Route', `Route ${routeKey} not found`);
+      return;
+    }
 
-      this.addLog('SCAN', `Checking route: ${route.name}`, 
-        `${route.fromToken} → ${route.midToken} → ${route.toToken}`
+    // Check if we have enough balance
+    const fromBalanceUsd = this.getTokenBalanceUsd(route.fromToken);
+    if (fromBalanceUsd < MIN_BALANCE_USD) {
+      this.addLog('ERROR', 'Insufficient Balance', 
+        `${route.fromToken} balance ($${fromBalanceUsd.toFixed(4)}) below minimum ($${MIN_BALANCE_USD})`
       );
-
-      // Try allocations: 10% then 50%
-      let foundProfitable = false;
-      let bestOpportunity: ArbitrageOpportunity | null = null;
-      let usedAllocation = 0;
-
-      for (const allocation of ALLOCATION_STEPS) {
-        const tradeAmount = this.calculateTradeAmountForToken(route.fromToken, allocation);
-        
-        if (tradeAmount < 0.01) {
-          this.addLog('WARNING', `Skipping ${(allocation * 100).toFixed(0)}%`, 
-            `Insufficient ${route.fromToken} balance`
-          );
-          continue;
-        }
-
-        this.addLog('SCAN', `Testing ${(allocation * 100).toFixed(0)}% of ${route.fromToken}...`, 
-          `Trade amount: $${tradeAmount.toFixed(4)}`
-        );
-
-        const pool = this.getRandomPool();
-        this.addLog('INFO', `Analyzing ${pool.name}`, `TVL: $${pool.tvl} | Fee: ${pool.fee}`);
-
-        // Call API to check profitability
-        const opportunity = await this.checkRouteProfitability(route, tradeAmount);
-
-        if (opportunity && opportunity.profitability.is_profitable) {
-          const slippage = opportunity.charges?.slippage?.estimated_slippage_percent || 0.02;
-          const gasCost = opportunity.charges?.gas_fees?.total_gas_cost_usd || 0.02;
-          
-          this.addLog('INFO', 'Slippage Analysis', 
-            `Estimated: ${slippage.toFixed(4)}% | Trend: ${slippage < 0.1 ? 'LOW' : 'MEDIUM'}`
-          );
-          this.addLog('INFO', 'Gas Estimation', 
-            `Cost: $${gasCost.toFixed(4)} | Network: Low congestion`
-          );
-
-          if (opportunity.profitability.profit_margin_percent >= this.config.minProfitThreshold) {
-            bestOpportunity = opportunity;
-            usedAllocation = allocation;
-            foundProfitable = true;
-            
-            this.addLog('SUCCESS', `Profitable at ${(allocation * 100).toFixed(0)}%!`, 
-              `Margin: ${opportunity.profitability.profit_margin_percent.toFixed(4)}%`
-            );
-            break;
-          }
-        }
-
-        if (allocation === 0.50 && !foundProfitable) {
-          this.addLog('WARNING', `Route ${routeKey} not profitable at 50%`, 'Moving to next route...');
-        }
-      }
-
-      // Execute if profitable
-      if (foundProfitable && bestOpportunity) {
-        await this.executeTriangularArbitrage(route, bestOpportunity, usedAllocation);
-        return; // Exit after successful trade
-      }
+      this.addLog('WARNING', 'Stopping Agent', 'Token balance too low to continue');
+      this.stop();
+      return;
     }
 
-    // No profitable route found
-    this.updateState({ tradesSkipped: this.state.tradesSkipped + 1 });
-    this.addLog('WARNING', 'No profitable routes this cycle', 'Will retry next cycle...');
+    this.addLog('SCAN', `Checking: ${route.name}`, 
+      `Allocation: ${(this.currentAllocationPercent * 100).toFixed(0)}%`
+    );
+
+    // Calculate trade amount
+    const tradeAmount = this.calculateTradeAmount(route.fromToken, this.currentAllocationPercent);
+    
+    if (tradeAmount < 0.01) {
+      this.addLog('WARNING', 'Trade Amount Too Low', `$${tradeAmount.toFixed(4)} < $0.01`);
+      this.handleUnprofitable(route);
+      return;
+    }
+
+    this.addLog('INFO', 'Trade Amount', `$${tradeAmount.toFixed(4)} (${(this.currentAllocationPercent * 100).toFixed(0)}% of ${route.fromToken})`);
+
+    // Check profitability via API
+    const opportunity = await this.checkProfitability(route, tradeAmount);
+
+    if (!opportunity) {
+      this.addLog('WARNING', 'API Error', 'Could not fetch profitability data');
+      return;
+    }
+
+    // Log API response details
+    const gasCost = opportunity.charges?.gas_fees?.total_gas_cost_usd || 0;
+    const slippage = opportunity.charges?.slippage?.estimated_slippage_percent || 0;
+    const totalCost = opportunity.charges?.total_costs?.total_fees_usd || opportunity.profitability.total_costs_usd || 0;
+
+    this.addLog('INFO', 'Analysis', 
+      `Profitable: ${opportunity.profitability.is_profitable} | Margin: ${opportunity.profitability.profit_margin_percent.toFixed(4)}%`
+    );
+    this.addLog('INFO', 'Costs', 
+      `Gas: $${gasCost.toFixed(4)} | Slippage: ${slippage.toFixed(4)}% | Total: $${totalCost.toFixed(4)}`
+    );
+
+    // Check if profitable
+    if (opportunity.profitability.is_profitable && 
+        opportunity.profitability.profit_margin_percent >= this.config.minProfitThreshold) {
+      
+      // Execute the trade
+      await this.executeTrade(route, opportunity);
+      
+      // Reset failure counter
+      this.consecutiveFailures = 0;
+      
+      // If we were at 10%, switch to 50% for next trade
+      if (this.currentAllocationPercent === 0.10) {
+        this.currentAllocationPercent = 0.50;
+        this.addLog('SUCCESS', 'Allocation Increased', 'Switching to 50% for continued trading');
+        this.updateState({ currentAllocation: 0.50 });
+      }
+      
+    } else {
+      // Not profitable at current allocation
+      this.handleUnprofitable(route);
+    }
   }
 
-  private calculateTradeAmountForToken(token: keyof VaultState, allocation: number): number {
+  private handleUnprofitable(route: ArbitrageRoute) {
+    this.consecutiveFailures++;
+    
+    if (this.currentAllocationPercent === 0.10) {
+      // Try 50%
+      this.addLog('WARNING', 'Not Profitable at 10%', 'Trying 50% allocation...');
+      this.currentAllocationPercent = 0.50;
+      this.updateState({ currentAllocation: 0.50 });
+      
+    } else if (this.currentAllocationPercent === 0.50) {
+      // Try 80%
+      this.addLog('WARNING', 'Not Profitable at 50%', 'Trying 80% allocation...');
+      this.currentAllocationPercent = 0.80;
+      this.updateState({ currentAllocation: 0.80 });
+      
+    } else if (this.currentAllocationPercent === 0.80) {
+      // Try 100%
+      this.addLog('WARNING', 'Not Profitable at 80%', 'Trying 100% allocation...');
+      this.currentAllocationPercent = 1.00;
+      this.updateState({ currentAllocation: 1.00 });
+      
+    } else {
+      // Already at 100%, still not profitable
+      this.addLog('ERROR', 'Not Profitable at 100%', 'No profitable opportunity found');
+      this.updateState({ tradesSkipped: this.state.tradesSkipped + 1 });
+      
+      // Reset to 10% for next route
+      this.currentAllocationPercent = 0.10;
+      this.updateState({ currentAllocation: 0.10 });
+      
+      // If too many consecutive failures, consider stopping
+      if (this.consecutiveFailures >= 12) { // 3 full cycles of all routes
+        this.addLog('ERROR', 'Too Many Failures', 'Stopping agent after 12 consecutive unprofitable checks');
+        this.stop();
+      }
+    }
+  }
+
+  private getTokenBalanceUsd(token: keyof VaultState): number {
     const balance = this.vaultBalances[token] || 0;
     const price = this.livePrices[token] || 1;
-    const balanceUsd = balance * price;
+    return balance * price;
+  }
+
+  private calculateTradeAmount(token: keyof VaultState, allocation: number): number {
+    const balanceUsd = this.getTokenBalanceUsd(token);
     return Math.min(balanceUsd * allocation, this.config.maxTradeCap);
   }
 
-  private async checkRouteProfitability(route: ArbitrageRoute, tradeAmount: number): Promise<ArbitrageOpportunity | null> {
+  private async checkProfitability(route: ArbitrageRoute, tradeAmount: number): Promise<ArbitrageOpportunity | null> {
     try {
       const response = await apiService.checkProfitability({
         from_token: route.apiFromToken,
@@ -388,65 +438,54 @@ class ArbiGentService {
     return null;
   }
 
-  private async executeTriangularArbitrage(route: ArbitrageRoute, opp: ArbitrageOpportunity, allocation: number) {
+  private async executeTrade(route: ArbitrageRoute, opp: ArbitrageOpportunity) {
     const { profitability, charges } = opp;
     const tradeAmountUsd = opp.route.trade_amount;
     
     const totalCostUsd = charges?.total_costs?.total_fees_usd || profitability.total_costs_usd || 0;
-    const gasCostUsd = charges?.gas_fees?.total_gas_cost_usd || 0.02;
-    const slippageCostUsd = charges?.slippage?.estimated_slippage_cost_usd || 0.01;
+    const gasCostUsd = charges?.gas_fees?.total_gas_cost_usd || 0;
+    const slippageCostUsd = charges?.slippage?.estimated_slippage_cost_usd || 0;
     const profitUsd = profitability.net_profit_usd;
 
     // Get prices
     const fromPrice = this.livePrices[route.fromToken] || 1;
     const midPrice = this.livePrices[route.midToken] || 1;
-    const toPrice = this.livePrices[route.toToken] || 1;
 
-    // Calculate token flow through triangular arbitrage
+    // Calculate token amounts
     // Step 1: from_token → mid_token
     const fromTokenAmount = tradeAmountUsd / fromPrice;
     const midTokenAmount = (fromTokenAmount * fromPrice) / midPrice;
     
-    // Step 2: mid_token → to_token (final output includes profit)
+    // Step 2: mid_token → from_token (circular arbitrage returns to from_token)
+    // Final amount = initial + profit
     const finalValueUsd = tradeAmountUsd + profitUsd;
-    const toTokenAmount = finalValueUsd / toPrice;
+    const returnedFromTokenAmount = finalValueUsd / fromPrice;
 
-    // Get pools for logging
-    const pool1 = this.getRandomPool();
-    const pool2 = this.getRandomPool();
-
-    this.addLog('SUCCESS', '⚡ EXECUTING TRIANGULAR ARBITRAGE', 
-      `Route: ${route.fromToken} → ${route.midToken} → ${route.toToken}`
-    );
-
-    this.addLog('INFO', 'DEX Route', 
-      `${pool1.name} (${route.fromToken}→${route.midToken}) → ${pool2.name} (${route.midToken}→${route.toToken})`
-    );
+    this.addLog('SUCCESS', '⚡ EXECUTING TRADE', route.name);
 
     this.addLog('INFO', 'Token Flow', 
-      `${route.fromToken}: -${fromTokenAmount.toFixed(6)} → ${route.midToken}: ${midTokenAmount.toFixed(6)} → ${route.toToken}: +${toTokenAmount.toFixed(6)}`
+      `${route.fromToken}: ${fromTokenAmount.toFixed(6)} → ${route.midToken}: ${midTokenAmount.toFixed(6)} → ${route.fromToken}: ${returnedFromTokenAmount.toFixed(6)}`
     );
 
     this.addLog('INFO', 'Cost Breakdown', 
       `Gas: $${gasCostUsd.toFixed(4)} | Slippage: $${slippageCostUsd.toFixed(4)} | Total: $${totalCostUsd.toFixed(4)}`
     );
 
-    // Update local vault balances
-    const oldFromBalance = this.vaultBalances[route.fromToken];
-    const oldToBalance = this.vaultBalances[route.toToken];
-    
-    this.vaultBalances[route.fromToken] = Math.max(0, oldFromBalance - fromTokenAmount);
-    this.vaultBalances[route.toToken] = oldToBalance + toTokenAmount;
+    // Update local vault - circular arbitrage: deduct original, add returned amount
+    // Net change = returnedFromTokenAmount - fromTokenAmount (which equals profit in token terms)
+    const netTokenChange = returnedFromTokenAmount - fromTokenAmount;
+    const oldBalance = this.vaultBalances[route.fromToken];
+    this.vaultBalances[route.fromToken] = oldBalance + netTokenChange;
 
-    this.addLog('SUCCESS', 'Local Vault Updated', 
-      `${route.fromToken}: ${oldFromBalance.toFixed(4)} → ${this.vaultBalances[route.fromToken].toFixed(4)} | ${route.toToken}: ${oldToBalance.toFixed(4)} → ${this.vaultBalances[route.toToken].toFixed(4)}`
+    this.addLog('SUCCESS', 'Vault Updated', 
+      `${route.fromToken}: ${oldBalance.toFixed(6)} → ${this.vaultBalances[route.fromToken].toFixed(6)} (${netTokenChange >= 0 ? '+' : ''}${netTokenChange.toFixed(6)})`
     );
 
-    // Update MongoDB vault via API
-    await this.updateMongoDBVault(route, fromTokenAmount, toTokenAmount);
+    // Update MongoDB vault
+    await this.updateMongoDBVault(route.fromToken, netTokenChange);
 
-    this.addLog('SUCCESS', 'Trade Completed', 
-      `Invested: $${tradeAmountUsd.toFixed(4)} | Received: $${finalValueUsd.toFixed(4)} | Net Profit: +$${profitUsd.toFixed(4)} (${profitability.profit_margin_percent.toFixed(4)}%)`
+    this.addLog('SUCCESS', 'Trade Complete', 
+      `Invested: $${tradeAmountUsd.toFixed(4)} | Returned: $${finalValueUsd.toFixed(4)} | Profit: +$${profitUsd.toFixed(4)} (${profitability.profit_margin_percent.toFixed(4)}%)`
     );
 
     // Update state
@@ -454,7 +493,6 @@ class ArbiGentService {
       totalProfit: this.state.totalProfit + profitUsd,
       tradesExecuted: this.state.tradesExecuted + 1,
       lastTradeTime: new Date(),
-      currentAllocation: this.config.allocationPercent,
       totalGasFees: this.state.totalGasFees + gasCostUsd,
       totalSlippage: this.state.totalSlippage + slippageCostUsd,
       totalCosts: this.state.totalCosts + totalCostUsd,
@@ -463,61 +501,37 @@ class ArbiGentService {
     this.notifyVaultUpdate();
 
     this.addLog('INFO', 'Session Stats', 
-      `Total Profit: $${this.state.totalProfit.toFixed(4)} | Trades: ${this.state.tradesExecuted} | Gas: $${this.state.totalGasFees.toFixed(4)}`
+      `Total Profit: $${this.state.totalProfit.toFixed(4)} | Trades: ${this.state.tradesExecuted}`
     );
   }
 
-  // Update MongoDB vault - deduct from_token and add to_token
-  private async updateMongoDBVault(route: ArbitrageRoute, fromAmount: number, toAmount: number) {
+  // Update MongoDB vault - add profit to from_token (circular arbitrage)
+  private async updateMongoDBVault(token: keyof VaultState, netChange: number) {
     if (!this.walletAddress) {
-      this.addLog('WARNING', 'MongoDB Update Skipped', 'No wallet address set');
+      this.addLog('WARNING', 'MongoDB Skip', 'No wallet address');
       return;
     }
 
+    if (Math.abs(netChange) < 0.000001) {
+      return; // Skip tiny changes
+    }
+
     try {
-      // Get decimals for each token
-      const fromDecimals = route.fromToken === 'APT' ? 8 : 6;
-      const toDecimals = route.toToken === 'APT' ? 8 : 6;
-
-      // Convert to smallest units
-      const fromAmountSmallest = Math.floor(fromAmount * Math.pow(10, fromDecimals)).toString();
-      const toAmountSmallest = Math.floor(toAmount * Math.pow(10, toDecimals)).toString();
-
-      // Generate mock transaction hash
+      const decimals = token === 'APT' ? 8 : 6;
+      const amountSmallest = Math.abs(Math.floor(netChange * Math.pow(10, decimals))).toString();
       const txHash = `0x${Date.now().toString(16)}${Math.random().toString(16).substr(2, 48)}`;
 
-      // Withdraw from_token (deduct from vault)
-      const withdrawResponse = await apiService.withdrawFromVault(
-        this.walletAddress,
-        route.fromToken,
-        fromAmountSmallest,
-        txHash + '_withdraw'
-      );
-
-      if (withdrawResponse.success) {
-        this.addLog('INFO', 'MongoDB: Deducted', 
-          `${route.fromToken}: -${fromAmount.toFixed(6)}`
-        );
+      if (netChange > 0) {
+        // Deposit (profit)
+        await apiService.depositToVault(this.walletAddress, token, amountSmallest, txHash);
+        this.addLog('INFO', 'MongoDB: Deposited', `${token}: +${netChange.toFixed(6)}`);
+      } else {
+        // Withdraw (loss - shouldn't happen in profitable trade)
+        await apiService.withdrawFromVault(this.walletAddress, token, amountSmallest, txHash);
+        this.addLog('INFO', 'MongoDB: Withdrawn', `${token}: ${netChange.toFixed(6)}`);
       }
-
-      // Deposit to_token (add to vault)
-      const depositResponse = await apiService.depositToVault(
-        this.walletAddress,
-        route.toToken,
-        toAmountSmallest,
-        txHash + '_deposit'
-      );
-
-      if (depositResponse.success) {
-        this.addLog('INFO', 'MongoDB: Added', 
-          `${route.toToken}: +${toAmount.toFixed(6)}`
-        );
-      }
-
-      this.addLog('SUCCESS', 'MongoDB Vault Synced', 'Balances updated in database');
-
     } catch (error) {
-      this.addLog('ERROR', 'MongoDB Update Failed', error instanceof Error ? error.message : 'Unknown error');
+      this.addLog('ERROR', 'MongoDB Error', error instanceof Error ? error.message : 'Unknown');
     }
   }
 
@@ -530,10 +544,7 @@ class ArbiGentService {
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     
-    if (hours > 0) {
-      return `${hours}h ${minutes}m`;
-    }
-    return `${minutes}m`;
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   }
 }
 
