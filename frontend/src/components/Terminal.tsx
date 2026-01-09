@@ -1,9 +1,9 @@
 import { motion } from "framer-motion";
-import { Search, CheckCircle, AlertTriangle, Info, XCircle } from "lucide-react";
+import { Search, CheckCircle, AlertTriangle, Info, XCircle, Sparkles } from "lucide-react";
 
 interface LogEntry {
   time: string;
-  type: "SCAN" | "EXECUTE" | "WARNING" | "ERROR" | "INFO";
+  type: "SCAN" | "EXECUTE" | "WARNING" | "ERROR" | "INFO" | "SUCCESS";
   message: string;
   detail?: string;
 }
@@ -20,6 +20,7 @@ const Terminal = ({ logs, title = "agent_logs", maxHeight = "400px", showPrompt 
     switch (type) {
       case "SCAN": return Search;
       case "EXECUTE": return CheckCircle;
+      case "SUCCESS": return Sparkles;
       case "WARNING": return AlertTriangle;
       case "ERROR": return XCircle;
       case "INFO": return Info;
@@ -31,6 +32,7 @@ const Terminal = ({ logs, title = "agent_logs", maxHeight = "400px", showPrompt 
     switch (type) {
       case "SCAN": return "text-blue-400";
       case "EXECUTE": return "text-green-400";
+      case "SUCCESS": return "text-emerald-400";
       case "WARNING": return "text-yellow-400";
       case "ERROR": return "text-red-400";
       case "INFO": return "text-gray-400";
