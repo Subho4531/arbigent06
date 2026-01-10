@@ -39,7 +39,7 @@ const Index = () => {
     {
       icon: Bot,
       title: "AUTONOMOUS AGENTS",
-      description: "AI agents execute trades 24/7 without manual intervention. Sleep while your agents work.",
+      description: "AI agents continuously monitor market prices, analyze execution conditions, and autonomously execute trades",
       badge: "ALWAYS ON",
       badgeColor: "green" as const,
     },
@@ -60,7 +60,7 @@ const Index = () => {
     {
       icon: TrendingUp,
       title: "MAXIMUM PROFITABILITY",
-      description: "Average 0.8% profit per trade, compounded automatically across DEXs.",
+      description: "Attain maximum profit per trade, compounded automatically across DEXs.",
       badge: "+$47,332 TOTAL",
       badgeColor: "green" as const,
     },
@@ -97,9 +97,7 @@ const Index = () => {
                 </h1>
                 
                 <p className="text-lg text-muted-foreground leading-relaxed mb-8 max-w-lg">
-                  Deploy autonomous agents that scan Aptos DEXs 24/7, 
-                  executing profitable arbitrage trades while you sleep.
-                  Confidential computation meets unstoppable execution.
+                  Execute autonomous arbitrage agents that continuously scan Aptos DEX, monitor prices, simulate execution paths, and atomatically execute profitable trades using confidential computation.
                 </p>
                 
                 <div className="flex flex-col sm:flex-row gap-4">
@@ -173,7 +171,7 @@ const Index = () => {
               {
                 icon: Shield,
                 title: "CONFIDENTIAL COMPUTE",
-                description: "Your logic runs privately in a zkVM. No one sees your strategy, inputs, or state.",
+                description: "Your logic runs inside browser enviroment. No one sees your strategy, inputs, or state.",
               },
               {
                 icon: Target,

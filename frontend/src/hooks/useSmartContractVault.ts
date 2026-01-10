@@ -121,12 +121,12 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
 
       // Use the vault deposit functions that properly burn tokens
       const transaction = {
-        type: "entry_function_payload",
-        function: token === 'USDC'
-          ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_usdc_to_vault`
-          : `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_usdt_to_vault`,
-        arguments: [tokenAmount],
-        type_arguments: [],
+        data: {
+          function: token === 'USDC'
+            ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_usdc_to_vault`
+            : `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_usdt_to_vault`,
+          functionArguments: [tokenAmount],
+        },
       };
 
 
@@ -185,10 +185,10 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
 
       // Use the direct APT vault deposit function
       const transaction = {
-        type: "entry_function_payload",
-        function: `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_apt_to_vault`,
-        arguments: [aptAmount],
-        type_arguments: [],
+        data: {
+          function: `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_apt_to_vault`,
+          functionArguments: [aptAmount],
+        },
       };
 
 
@@ -325,10 +325,10 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       }
 
       const transaction = {
-        type: "entry_function_payload",
-        function: functionName,
-        arguments: [tokenAmount],
-        type_arguments: [],
+        data: {
+          function: functionName,
+          functionArguments: [tokenAmount],
+        },
       };
 
 
