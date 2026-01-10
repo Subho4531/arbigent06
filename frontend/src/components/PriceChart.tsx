@@ -323,7 +323,7 @@ const PriceChart = () => {
             {isLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground mr-2">5min window • 3s refresh</span>
+            {/* <span className="text-xs text-muted-foreground mr-2">5min window • 3s refresh</span> */}
             <Button variant="ghost" size="sm" onClick={handleZoomOut} className="h-7 w-7 p-0">
               <ZoomOut className="h-4 w-4" />
             </Button>

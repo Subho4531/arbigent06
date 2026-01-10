@@ -12,6 +12,9 @@ import { useMarketData } from "@/hooks/useMarketData";
 import { useSmartContractVault } from "@/hooks/useSmartContractVault";
 import { balanceService } from "@/services/BalanceService";
 
+
+
+
 const Vault = () => {
   const { account, connected } = useWallet();
   const { vault, transactions, isLoading, error, refreshVault, refreshTransactions, getFormattedBalance } = useVault();

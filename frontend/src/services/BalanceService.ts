@@ -100,12 +100,10 @@ export class BalanceService {
       const cached = this.getCachedBalance(cacheKey);
       if (cached) return cached;
 
-      console.log('🔍 Fetching USDC balance using Fungible Asset API for:', address);
 
       // Use the correct USDC coin type from our contract
       const usdcCoinType = `${CONTRACT_ADDRESS}::swap::USDC`;
       
-      console.log('🪙 USDC Coin Type:', usdcCoinType);
 
       try {
         const usdcAssets = await this.aptos.getCurrentFungibleAssetBalances({
@@ -117,43 +115,35 @@ export class BalanceService {
           }
         });
 
-        console.log('📊 USDC Assets Response:', usdcAssets);
 
         if (usdcAssets && usdcAssets.length > 0) {
           const rawBalance = usdcAssets[0].amount;
           const formattedBalance = this.formatBalance(rawBalance, TOKEN_CONFIGS.USDC.decimals);
           
-          console.log('💰 USDC Balance Found:', { rawBalance, formattedBalance });
           
           this.setCachedBalance(cacheKey, formattedBalance);
           return formattedBalance;
         } else {
-          console.log('❌ No USDC assets found');
           this.setCachedBalance(cacheKey, '0');
           return '0';
         }
       } catch (assetError) {
-        console.error('❌ Fungible Asset API error:', assetError);
         
         // Check for external USDC tokens
-        console.log('🔄 Checking for external USDC tokens...');
         const externalUSDC = await this.checkExternalUSDC(address);
         
         if (externalUSDC !== '0') {
-          console.log('💰 Found external USDC:', externalUSDC);
           this.setCachedBalance(cacheKey, externalUSDC);
           return externalUSDC;
         }
         
         // Fallback to checking common USDC types using Coin API
-        console.log('🔄 Falling back to Coin API for USDC...');
         let totalBalance = 0n;
         
         for (const coinType of COMMON_USDC_TYPES) {
           try {
             const balance = await this.fetchTokenBalance(address, coinType);
             if (balance !== '0') {
-              console.log(`💰 Found USDC balance in ${coinType}:`, balance);
               totalBalance += BigInt(balance);
             }
           } catch (error) {
@@ -176,7 +166,6 @@ export class BalanceService {
    * Check for external USDC tokens (from other sources like exchanges, bridges, etc.)
    */
   async checkExternalUSDC(address: string): Promise<string> {
-    console.log('🔍 Checking for external USDC tokens...');
     
     try {
       // Get all fungible asset balances for the address
@@ -188,7 +177,6 @@ export class BalanceService {
         }
       });
 
-      console.log('📊 All fungible assets:', allAssets);
 
       // Look for any asset that might be USDC
       const usdcAssets = allAssets.filter((asset: any) => {
@@ -198,7 +186,6 @@ export class BalanceService {
                assetType.includes('usd coin');
       });
 
-      console.log('💰 Found potential USDC assets:', usdcAssets);
 
       if (usdcAssets.length > 0) {
         let totalBalance = 0n;
@@ -206,12 +193,10 @@ export class BalanceService {
         for (const asset of usdcAssets) {
           const balance = BigInt(asset.amount || '0');
           totalBalance += balance;
-          console.log(`💰 USDC Asset: ${asset.asset_type} - Balance: ${asset.amount}`);
         }
 
         // Assume 6 decimals for USDC (standard)
         const formattedBalance = this.formatBalance(totalBalance.toString(), 6);
-        console.log('💰 Total external USDC balance:', formattedBalance);
         return formattedBalance;
       }
 
@@ -227,12 +212,10 @@ export class BalanceService {
       const cached = this.getCachedBalance(cacheKey);
       if (cached) return cached;
 
-      console.log('🔍 Fetching USDT balance using Fungible Asset API for:', address);
 
       // Use the correct USDT coin type from our contract
       const usdtCoinType = `${CONTRACT_ADDRESS}::swap::USDT`;
       
-      console.log('🪙 USDT Coin Type:', usdtCoinType);
 
       try {
         const usdtAssets = await this.aptos.getCurrentFungibleAssetBalances({
@@ -244,18 +227,15 @@ export class BalanceService {
           }
         });
 
-        console.log('📊 USDT Assets Response:', usdtAssets);
 
         if (usdtAssets && usdtAssets.length > 0) {
           const rawBalance = usdtAssets[0].amount;
           const formattedBalance = this.formatBalance(rawBalance, TOKEN_CONFIGS.USDT.decimals);
           
-          console.log('💰 USDT Balance Found:', { rawBalance, formattedBalance });
           
           this.setCachedBalance(cacheKey, formattedBalance);
           return formattedBalance;
         } else {
-          console.log('❌ No USDT assets found');
           this.setCachedBalance(cacheKey, '0');
           return '0';
         }
@@ -263,14 +243,12 @@ export class BalanceService {
         console.error('❌ Fungible Asset API error:', assetError);
         
         // Fallback to checking common USDT types using Coin API
-        console.log('🔄 Falling back to Coin API for USDT...');
         let totalBalance = 0n;
         
         for (const coinType of COMMON_USDT_TYPES) {
           try {
             const balance = await this.fetchTokenBalance(address, coinType);
             if (balance !== '0') {
-              console.log(`💰 Found USDT balance in ${coinType}:`, balance);
               totalBalance += BigInt(balance);
             }
           } catch (error) {

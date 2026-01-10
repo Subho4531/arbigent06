@@ -36,6 +36,8 @@ const Agents = () => {
   const [minProfit, setMinProfit] = useState([0.0001]);
   const [selectedPair, setSelectedPair] = useState("AUTO");
   const [riskLevel, setRiskLevel] = useState<RiskLevel>("MEDIUM");
+  const [investedAmount, setInvestedAmount] = useState([100]); // Default $100
+  const [useFixedAmount, setUseFixedAmount] = useState(false); // Toggle for fixed vs automatic
   const [vaultBalances, setVaultBalances] = useState<VaultTokenBalance[]>([]);
   const [totalUsdValue, setTotalUsdValue] = useState("0.00");
   const [isLoadingVault, setIsLoadingVault] = useState(false);
@@ -66,10 +68,10 @@ const Agents = () => {
   ];
   
   const riskLevels: { value: RiskLevel; maxTrade: string; gasLimit: string }[] = [
-    { value: "LOW", maxTrade: "$2,500", gasLimit: "0.003 APT" },
-    { value: "MEDIUM", maxTrade: "$5,000", gasLimit: "0.005 APT" },
-    { value: "HIGH", maxTrade: "$10,000", gasLimit: "0.01 APT" },
-    { value: "VERY_HIGH", maxTrade: "$1,000,000", gasLimit: "0.05 APT" },
+    { value: "LOW", maxTrade: "$1,000", gasLimit: "0.003 APT" },
+    { value: "MEDIUM", maxTrade: "$2,500", gasLimit: "0.005 APT" },
+    { value: "HIGH", maxTrade: "$5,000", gasLimit: "0.01 APT" },
+    { value: "VERY_HIGH", maxTrade: "$10,000", gasLimit: "0.05 APT" },
   ];
   
   const selectedRisk = riskLevels.find(r => r.value === riskLevel);
@@ -147,7 +149,7 @@ const Agents = () => {
 
   // Update agent with live prices
   useEffect(() => {
-    updatePrices(prices);
+    updatePrices(prices as unknown as Record<string, number>);
   }, [prices, updatePrices]);
 
   // Set wallet address for MongoDB updates
@@ -163,8 +165,9 @@ const Agents = () => {
       minProfitThreshold: minProfit[0],
       riskTolerance: riskLevel,
       selectedPair: selectedPair,
+      investedAmount: useFixedAmount ? investedAmount[0] : undefined,
     });
-  }, [minProfit, riskLevel, selectedPair, updateConfig]);
+  }, [minProfit, riskLevel, selectedPair, investedAmount, useFixedAmount, updateConfig]);
 
   // Handle start/stop
   const handleStartAgent = () => {
@@ -177,7 +180,6 @@ const Agents = () => {
 
   return (
     <div className="min-h-screen bg-background dark relative overflow-hidden">
-      <AnimatedBackground />
       <Header />
       
       <main className="pt-24 pb-16 relative z-10">
@@ -198,117 +200,7 @@ const Agents = () => {
           </motion.div>
 
           {/* Active Agents Status - New Section */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="mb-6"
-          >
-            <div className="rounded-xl border border-border bg-card p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-display text-xl font-bold tracking-wide text-foreground flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-primary" />
-                  ACTIVE AGENTS
-                </h2>
-                <div className="flex items-center gap-2">
-                  {isRunning && (
-                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-success/20 border border-success/30">
-                      <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                      <span className="text-xs font-mono text-success">RUNNING</span>
-                    </div>
-                  )}
-                  <span className="text-sm text-muted-foreground">
-                    {isRunning ? '1 Active' : '0 Active'}
-                  </span>
-                </div>
-              </div>
-              
-              {isRunning ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Agent Status Card */}
-                  <div className="rounded-lg border border-border bg-background/50 p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-success animate-pulse" />
-                        <span className="font-display font-bold text-foreground">ArbiGent #1</span>
-                      </div>
-                      <span className="text-xs text-muted-foreground">Running: {runningDuration}</span>
-                    </div>
-                    
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Strategy:</span>
-                        <span className="font-mono text-foreground">{selectedPair}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Risk Level:</span>
-                        <span className="font-mono text-foreground">{riskLevel}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Min Profit:</span>
-                        <span className="font-mono text-foreground">{minProfit[0].toFixed(4)}%</span>
-                      </div>
-                    </div>
-                    
-                    {/* Performance Metrics */}
-                    <div className="mt-4 pt-3 border-t border-border">
-                      <div className="grid grid-cols-3 gap-3 text-center">
-                        <div>
-                          <p className="text-xs text-muted-foreground">Profit</p>
-                          <p className="font-mono font-bold text-success">+${agentState.totalProfit.toFixed(2)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Trades</p>
-                          <p className="font-mono font-bold text-foreground">{agentState.tradesExecuted}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Success</p>
-                          <p className="font-mono font-bold text-primary">
-                            {agentState.tradesExecuted > 0 
-                              ? ((agentState.tradesExecuted / (agentState.tradesExecuted + agentState.tradesSkipped)) * 100).toFixed(0)
-                              : 0}%
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Recent Activity */}
-                  <div className="rounded-lg border border-border bg-background/50 p-4">
-                    <h3 className="font-display font-bold text-foreground mb-3">Recent Activity</h3>
-                    <div className="space-y-2 max-h-32 overflow-y-auto">
-                      {logs.slice(-4).reverse().map((log, index) => (
-                        <div key={index} className="flex items-start gap-2 text-xs">
-                          <span className="text-muted-foreground whitespace-nowrap">[{log.time}]</span>
-                          <span className={`font-mono ${
-                            log.type === 'SUCCESS' ? 'text-success' :
-                            log.type === 'ERROR' ? 'text-destructive' :
-                            log.type === 'WARNING' ? 'text-warning' :
-                            log.type === 'SCAN' ? 'text-primary' :
-                            'text-muted-foreground'
-                          }`}>
-                            {log.type}
-                          </span>
-                          <span className="text-foreground truncate">{log.message}</span>
-                        </div>
-                      ))}
-                      {logs.length === 0 && (
-                        <p className="text-xs text-muted-foreground text-center py-2">No activity yet</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-8">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted/50 mx-auto mb-4">
-                    <Shield className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <p className="text-muted-foreground mb-2">No active agents</p>
-                  <p className="text-xs text-muted-foreground">Start an agent to begin autonomous trading</p>
-                </div>
-              )}
-            </div>
-          </motion.div>
+          
 
           {/* Vault Balances - Top Section */}
           <motion.div
@@ -382,7 +274,7 @@ const Agents = () => {
                     value={minProfit}
                     onValueChange={setMinProfit}
                     min={0.0001}
-                    max={2}
+                    max={1}
                     step={0.0001}
                     className="mb-2"
                     disabled={isRunning}
@@ -390,12 +282,110 @@ const Agents = () => {
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Min: 0.0001%</span>
                     <span className="font-mono font-semibold text-primary">{minProfit[0].toFixed(4)}%</span>
-                    <span className="text-muted-foreground">Max: 2.0%</span>
+                    <span className="text-muted-foreground">Max: 1.0%</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-2">
                     Only execute trades with profit ≥ {minProfit[0].toFixed(4)}%
                   </p>
                 </div>
+
+                {/* Investment Mode Selection */}
+                <div className="mb-6">
+                  <label className="text-sm text-muted-foreground mb-3 block font-display">
+                    Investment Mode
+                  </label>
+                  <div className="space-y-3">
+                    <label className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all border ${
+                      !useFixedAmount
+                        ? "bg-primary/10 border-primary/30"
+                        : "bg-muted/50 border-transparent hover:bg-muted"
+                    } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                      <input
+                        type="radio"
+                        name="investmentMode"
+                        checked={!useFixedAmount}
+                        onChange={() => !isRunning && setUseFixedAmount(false)}
+                        disabled={isRunning}
+                        className="sr-only"
+                      />
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                        !useFixedAmount ? "border-primary" : "border-muted-foreground"
+                      }`}>
+                        {!useFixedAmount && (
+                          <div className="w-2 h-2 rounded-full bg-primary" />
+                        )}
+                      </div>
+                      <div>
+                        <span className={`font-mono text-sm ${
+                          !useFixedAmount ? "text-foreground" : "text-muted-foreground"
+                        }`}>
+                          Automatic Allocation
+                        </span>
+                        <p className="text-xs text-muted-foreground">
+                          Dynamic investment
+                        </p>
+                      </div>
+                    </label>
+                    
+                    <label className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all border ${
+                      useFixedAmount
+                        ? "bg-primary/10 border-primary/30"
+                        : "bg-muted/50 border-transparent hover:bg-muted"
+                    } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                      <input
+                        type="radio"
+                        name="investmentMode"
+                        checked={useFixedAmount}
+                        onChange={() => !isRunning && setUseFixedAmount(true)}
+                        disabled={isRunning}
+                        className="sr-only"
+                      />
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                        useFixedAmount ? "border-primary" : "border-muted-foreground"
+                      }`}>
+                        {useFixedAmount && (
+                          <div className="w-2 h-2 rounded-full bg-primary" />
+                        )}
+                      </div>
+                      <div>
+                        <span className={`font-mono text-sm ${
+                          useFixedAmount ? "text-foreground" : "text-muted-foreground"
+                        }`}>
+                          Fixed Amount
+                        </span>
+                        <p className="text-xs text-muted-foreground">
+                          Fixed amount investment
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Invested Amount - Only show when Fixed Amount is selected */}
+                {useFixedAmount && (
+                  <div className="mb-6">
+                    <label className="text-sm text-muted-foreground mb-3 block font-display">
+                      Fixed Amount per Trade
+                    </label>
+                    <Slider
+                      value={investedAmount}
+                      onValueChange={setInvestedAmount}
+                      min={10}
+                      max={10000}
+                      step={1}
+                      className="mb-2"
+                      disabled={isRunning}
+                    />
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Min: $10</span>
+                      <span className="font-mono font-semibold text-primary">${investedAmount[0].toFixed(0)}</span>
+                      <span className="text-muted-foreground">Max: $10,000</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Fixed amount to invest per trade. Agent will check all pairs continuously until manually stopped.
+                    </p>
+                  </div>
+                )}
                 
                 {/* Trading Pairs */}
                 <div className="mb-6">
@@ -449,13 +439,13 @@ const Agents = () => {
                         key={level}
                         onClick={() => !isRunning && setRiskLevel(level)}
                         disabled={isRunning}
-                        className={`py-2 px-3 rounded-lg font-display text-sm font-bold transition-all ${
+                        className={`py-2 px-1 rounded-lg font-display text-sm font-bold transition-all ${
                           riskLevel === level
                             ? "bg-primary text-primary-foreground"
                             : "bg-muted text-muted-foreground hover:bg-muted/80"
                         } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
-                        {level}
+                        {level.split("_").join(" ")}
                       </button>
                     ))}
                   </div>
@@ -466,7 +456,23 @@ const Agents = () => {
                         <span className="font-mono text-foreground">{selectedRisk.maxTrade}</span>
                         <span className="text-muted-foreground">Gas limit:</span>
                         <span className="font-mono text-foreground">{selectedRisk.gasLimit}</span>
+                        {useFixedAmount && (
+                          <>
+                            <span className="text-muted-foreground">Your amount:</span>
+                            <span className="font-mono text-primary">${investedAmount[0].toFixed(0)}</span>
+                          </>
+                        )}
                       </div>
+                      {useFixedAmount && investedAmount[0] > parseInt(selectedRisk.maxTrade.replace(/[$,]/g, '')) && (
+                        <p className="text-xs text-warning mt-2">
+                          ⚠️ Your invested amount exceeds the risk limit. It will be capped at {selectedRisk.maxTrade}.
+                        </p>
+                      )}
+                      {!useFixedAmount && (
+                        <p className="text-xs text-muted-foreground mt-2">
+                          💡 Automatic mode will use percentage-based allocation from your vault balance.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -567,14 +573,14 @@ const Agents = () => {
                     <Button variant="ghost" size="sm" className="text-xs" onClick={clearLogs}>
                       Clear
                     </Button>
-                    <Button variant="ghost" size="sm" className="text-xs">Export</Button>
+                    {/* <Button variant="ghost" size="sm" className="text-xs">Export</Button> */}
                   </div>
                 </div>
                 
                 {isRunning || logs.length > 0 ? (
                   <Terminal 
                     logs={terminalLogs}
-                    title="arbigent@aptos-testnet: ~/agent_logs"
+                    title="arbigent@aptos:  ~/logs"
                     maxHeight="400px"
                   />
                 ) : (
@@ -585,7 +591,7 @@ const Agents = () => {
                         <div className="terminal-dot-yellow" />
                         <div className="terminal-dot-green" />
                       </div>
-                      <span className="ml-4 text-sm text-gray-400 font-mono">arbigent@aptos-testnet</span>
+                      <span className="ml-4 text-sm text-gray-400 font-mono">arbigent@aptos</span>
                     </div>
                     <div className="terminal-body bg-[hsl(220,13%,10%)] p-8 text-center">
                       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[hsl(220,13%,18%)] mx-auto mb-3">

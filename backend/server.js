@@ -32,7 +32,6 @@ const faucetAccount = Account.fromPrivateKey({
   privateKey: new Ed25519PrivateKey(FAUCET_PRIVATE_KEY)
 });
 
-console.log('Faucet account:', faucetAccount.accountAddress.toString());
 
 // Rate limiting
 const requestLog = new Map();
@@ -446,6 +445,110 @@ app.get('/api/agents/:walletAddress/stats/:agentType', async (req, res) => {
     });
   } catch (error) {
     console.error('Get agent stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get arbitrage stats for a wallet
+app.get('/api/vault/:walletAddress/arbitrage-stats', async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    
+    
+    if (!walletAddress) {
+      return res.status(400).json({ error: 'Wallet address is required' });
+    }
+    
+    // Find vault
+    const vault = await Vault.findOne({ walletAddress: walletAddress.toLowerCase() });
+    
+    if (!vault) {
+      return res.json({
+        success: true,
+        arbitrageStats: {
+          totalProfitLoss: 0,
+          totalTrades: 0,
+          totalSessions: 0,
+          winRate: 0,
+          bestTrade: 0,
+          worstTrade: 0,
+          totalGasFees: 0,
+          totalSlippage: 0,
+          lastSessionProfit: 0,
+          lastSessionTrades: 0,
+          lastSessionDate: null
+        }
+      });
+    }
+    
+    
+    res.json({
+      success: true,
+      arbitrageStats: vault.arbitrageStats || {
+        totalProfitLoss: 0,
+        totalTrades: 0,
+        totalSessions: 0,
+        winRate: 0,
+        bestTrade: 0,
+        worstTrade: 0,
+        totalGasFees: 0,
+        totalSlippage: 0,
+        lastSessionProfit: 0,
+        lastSessionTrades: 0,
+        lastSessionDate: null
+      }
+    });
+  } catch (error) {
+    console.error('💥 Get arbitrage stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update arbitrage stats (called when agent stops)
+app.post('/api/vault/:walletAddress/arbitrage-stats', async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const { 
+      sessionProfit, 
+      sessionTrades, 
+      sessionGasFees, 
+      sessionSlippage,
+      bestTrade,
+      worstTrade 
+    } = req.body;
+    
+    
+    if (!walletAddress) {
+      return res.status(400).json({ error: 'Wallet address is required' });
+    }
+    
+    if (sessionProfit === undefined || sessionTrades === undefined) {
+      return res.status(400).json({ 
+        error: 'Session profit and trades count are required' 
+      });
+    }
+    
+    // Find or create vault
+    const vault = await Vault.findOrCreate(walletAddress);
+    
+    // Update arbitrage stats
+    await vault.updateArbitrageStats({
+      sessionProfit: sessionProfit || 0,
+      sessionTrades: sessionTrades || 0,
+      sessionGasFees: sessionGasFees || 0,
+      sessionSlippage: sessionSlippage || 0,
+      bestTrade: bestTrade || 0,
+      worstTrade: worstTrade || 0
+    });
+    
+    
+    res.json({
+      success: true,
+      message: 'Arbitrage stats updated successfully',
+      arbitrageStats: vault.arbitrageStats
+    });
+  } catch (error) {
+    console.error('💥 Update arbitrage stats error:', error);
     res.status(500).json({ error: error.message });
   }
 });

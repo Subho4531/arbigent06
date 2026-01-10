@@ -81,14 +81,10 @@ const seedCoins = async () => {
     
     await Coin.insertMany(coins);
     
-    console.log('✅ Coins seeded successfully');
-    console.log(`📊 Inserted ${coins.length} coins`);
     
     // Display seeded coins
     const seededCoins = await Coin.find({}).sort({ symbol: 1 });
-    console.log('\n📋 Seeded Coins:');
     seededCoins.forEach(coin => {
-      console.log(`  ${coin.symbol} (${coin.name}) - Vault: ${coin.vaultConfig.isVaultEnabled ? '✅' : '❌'}`);
     });
     
     process.exit(0);

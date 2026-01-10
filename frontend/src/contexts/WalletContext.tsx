@@ -1,22 +1,21 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useWallet as useAptosWallet } from '@aptos-labs/wallet-adapter-react';
-import { Network } from '@aptos-labs/ts-sdk';
 import { 
   NetworkConfig, 
   NetworkValidator, 
   NetworkSwitcher, 
-  DEFAULT_NETWORK,
   APTOS_TESTNET_CONFIG 
 } from '@/config/network';
-import { balanceService, TokenBalances } from '@/services/BalanceService';
+import { balanceService } from '@/services/BalanceService';
 import { 
   formatError, 
   FormattedError, 
   withLoadingAndError,
   globalLoadingManager 
 } from '@/utils/errorHandling';
+import { useSmartContractVault } from '@/hooks/useSmartContractVault';
 
-// Token balance interface (re-export from service)
+// Token balance interface
 interface TokenBalances {
   APT: string;
   USDC: string;
@@ -72,6 +71,20 @@ interface WalletContextType {
   fetchBalances: () => Promise<void>;
   refreshBalances: () => Promise<void>;
   
+  // Smart contract vault operations
+  smartContract: {
+    isProcessing: boolean;
+    error: string | null;
+    depositAPTtoVault: (amount: string, targetToken: 'USDC' | 'USDT') => Promise<boolean>;
+    depositAPTDirectToVault: (amount: string) => Promise<boolean>;
+    depositTokenToVault: (amount: string, token: 'USDC' | 'USDT') => Promise<boolean>;
+    withdrawFromVault: (amount: string, sourceToken: 'APT' | 'USDC' | 'USDT') => Promise<boolean>;
+    mintTestTokens: (token: 'USDC' | 'USDT', amount: string) => Promise<boolean>;
+    swapTokens: (fromToken: 'USDC' | 'USDT', toToken: 'USDC' | 'USDT', amount: string) => Promise<boolean>;
+    executeArbitrage: (inputAmount: string, tokenPair: string) => Promise<boolean>;
+    clearError: () => void;
+  };
+  
   // Error handling
   error: string | null;
   formattedError: FormattedError | null;
@@ -94,12 +107,13 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     disconnect: aptosDisconnect,
     account: aptosAccount,
     connected: aptosConnected,
-    connecting: aptosConnecting,
-    disconnecting: aptosDisconnecting,
     wallet: aptosWallet,
     wallets: aptosWallets,
     network: aptosNetwork
   } = useAptosWallet();
+
+  // Use smart contract vault hook
+  const smartContractVault = useSmartContractVault();
 
   // Local state for balances and errors
   const [balances, setBalances] = useState<TokenBalances>({
@@ -108,7 +122,6 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     USDT: '0'
   });
   
-  const [balancesLoading, setBalancesLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [formattedError, setFormattedError] = useState<FormattedError | null>(null);
 
@@ -193,14 +206,14 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
         }
         
         // Attempt to connect using the Aptos wallet adapter
-        await aptosConnect(walletName);
+        aptosConnect(walletName);
         
         // Verify network is testnet (requirement 2.1, 2.2)
         // Wait a moment for network info to be available
         setTimeout(() => {
           if (aptosNetwork && !NetworkValidator.isConnectedToTestnet(aptosNetwork)) {
             const promptMessage = `Wrong network detected. ${NetworkSwitcher.getNetworkSwitchPrompt(APTOS_TESTNET_CONFIG)}`;
-            handleError(new Error(promptMessage));
+            handleError(formatError(new Error(promptMessage)));
             console.warn('Wallet connected to wrong network. Expected testnet.');
           }
         }, 1000);
@@ -221,7 +234,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       'wallet-disconnect',
       async () => {
         // Disconnect using the Aptos wallet adapter
-        await aptosDisconnect();
+        aptosDisconnect();
         
         // Comprehensive state cleanup
         localStorage.removeItem('wallet_connected');
@@ -298,14 +311,13 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
   };
 
   // Enhanced error handling helper
-  const handleError = (err: Error | string) => {
-    const errorMessage = err instanceof Error ? err.message : err;
-    const formatted = formatError(err);
+  const handleError = (err: FormattedError) => {
+    const errorMessage = err.message || 'Unknown error';
     
     setError(errorMessage);
-    setFormattedError(formatted);
+    setFormattedError(err);
     
-    console.error('Wallet error:', formatted);
+    console.error('Wallet error:', err);
   };
 
   // Clear error helper
@@ -328,7 +340,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     const connectionTime = localStorage.getItem('wallet_connection_time');
     
     // Only attempt reconnection if we have valid stored state
-    if (wasConnected === 'true' && walletName && !aptosConnected && !aptosConnecting) {
+    if (wasConnected === 'true' && walletName && !aptosConnected && !isConnecting) {
       // Check if connection is not too old (optional: expire after 24 hours)
       const maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
       const isConnectionFresh = connectionTime && 
@@ -354,8 +366,8 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
   }, []);
 
   // Check loading states from global loading manager
-  const isConnecting = globalLoadingManager.isLoading('wallet-connect') || aptosConnecting;
-  const isDisconnecting = globalLoadingManager.isLoading('wallet-disconnect') || aptosDisconnecting;
+  const isConnecting = globalLoadingManager.isLoading('wallet-connect');
+  const isDisconnecting = globalLoadingManager.isLoading('wallet-disconnect');
   const isBalancesLoading = globalLoadingManager.isLoading('balance-fetch') || globalLoadingManager.isLoading('balance-refresh');
 
   const contextValue: WalletContextType = {
@@ -392,6 +404,20 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     // Balance operations
     fetchBalances,
     refreshBalances,
+    
+    // Smart contract vault operations
+    smartContract: {
+      isProcessing: smartContractVault.isProcessing,
+      error: smartContractVault.error,
+      depositAPTtoVault: smartContractVault.depositAPTtoVault,
+      depositAPTDirectToVault: smartContractVault.depositAPTDirectToVault,
+      depositTokenToVault: smartContractVault.depositTokenToVault,
+      withdrawFromVault: smartContractVault.withdrawFromVault,
+      mintTestTokens: smartContractVault.mintTestTokens,
+      swapTokens: smartContractVault.swapTokens,
+      executeArbitrage: smartContractVault.executeArbitrage,
+      clearError: smartContractVault.clearError,
+    },
     
     // Error handling
     error,

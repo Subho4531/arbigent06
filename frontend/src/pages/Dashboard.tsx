@@ -1,16 +1,21 @@
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
-import { 
-  Wallet, TrendingUp, Bot, ArrowRight, 
-  Shield, Vault, Activity, ExternalLink, RefreshCw 
+import { useState, useCallback, useEffect, useRef } from "react";
+import {
+  Wallet, TrendingUp, Bot, ArrowRight,
+  Shield, Vault, Activity, ExternalLink, RefreshCw
 } from "lucide-react";
 import Header from "@/components/Header";
 import StatsCard from "@/components/StatsCard";
 import CryptoLogo from "@/components/CryptoLogo";
+import DashboardSkeleton from "@/components/DashboardSkeleton";
+import UpdateNotification from "@/components/UpdateNotification";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/contexts/WalletContext";
 import { useVault } from "@/hooks/useVault";
 import { useMarketData } from "@/hooks/useMarketData";
+import { apiService } from "@/services/ApiService";
+import useArbiGent from "@/hooks/useArbiGent";
 
 // Low-brightness animated background component (matches Vault.tsx style)
 const AnimatedBackground = () => (
@@ -22,17 +27,127 @@ const AnimatedBackground = () => (
 );
 
 const Dashboard = () => {
-  const { connected } = useWallet();
+  const { connected, account } = useWallet();
   const { vault, isLoading: vaultLoading } = useVault();
   const { tokenPrices, opportunities, isLoading: marketLoading, refreshOpportunities } = useMarketData();
-  
+
+  // ArbiGent hook for agent status
+  const {
+    isRunning,
+    logs,
+    agentState,
+    agentConfig,
+    runningDuration,
+    startAgent,
+    stopAgent,
+    clearLogs,
+    updateConfig,
+    updateVaultBalances: updateAgentVaultBalances,
+    updatePrices,
+    setWalletAddress,
+    onStatsUpdate,
+  } = useArbiGent();
+
+  // State for arbitrage stats
+  const [arbitrageStats, setArbitrageStats] = useState<any>(null);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [lastStatsUpdate, setLastStatsUpdate] = useState<Date | null>(null);
+  const [previousStats, setPreviousStats] = useState<any>(null);
+  const [showUpdateNotification, setShowUpdateNotification] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState('');
+  const [notificationType, setNotificationType] = useState<'success' | 'info' | 'profit' | 'loss'>('info');
+
+  // Use ref to avoid dependency issues
+  const arbitrageStatsRef = useRef<any>(null);
+
+  // Fetch arbitrage stats
+  const fetchArbitrageStats = useCallback(async (isBackground = false) => {
+    if (!connected || !account?.address) {
+      console.log('Not fetching stats - not connected or no address');
+      setArbitrageStats(null);
+      setIsInitialLoad(false);
+      return;
+    }
+
+
+    // Only show loading spinner for manual refreshes, not background updates
+    if (!isBackground) {
+      setIsLoadingStats(true);
+    }
+
+    try {
+      const response = await apiService.getArbitrageStats(account.address);
+
+      if (response.success) {
+
+        // Store previous stats for smooth transitions
+        const currentStats = arbitrageStatsRef.current;
+        if (currentStats) {
+          setPreviousStats(currentStats);
+
+          // Show notification for significant changes
+          const profitChange = response.data.arbitrageStats.totalProfitLoss - currentStats.totalProfitLoss;
+          if (Math.abs(profitChange) > 0.01) {
+            setNotificationMessage(`Arbitrage updated: ${profitChange >= 0 ? '+' : ''}$${profitChange.toFixed(2)}`);
+            setNotificationType(profitChange >= 0 ? 'profit' : 'loss');
+            setShowUpdateNotification(true);
+          }
+        }
+
+        setArbitrageStats(response.data.arbitrageStats);
+        arbitrageStatsRef.current = response.data.arbitrageStats;
+        setLastStatsUpdate(new Date());
+        setIsInitialLoad(false);
+      } else {
+        console.warn('❌ Failed to fetch arbitrage stats:', response.error);
+        if (isInitialLoad) {
+          setArbitrageStats(null);
+        }
+        setIsInitialLoad(false);
+      }
+    } catch (error) {
+      console.error('💥 Error fetching arbitrage stats:', error);
+      if (isInitialLoad) {
+        setArbitrageStats(null);
+      }
+      setIsInitialLoad(false);
+    } finally {
+      if (!isBackground) {
+        setIsLoadingStats(false);
+      }
+    }
+  }, [connected, account?.address]);
+
+  // Fetch arbitrage stats on mount and when wallet changes
+  useEffect(() => {
+    fetchArbitrageStats();
+  }, [fetchArbitrageStats]);
+
+  // Set wallet address when account changes
+  useEffect(() => {
+    if (account?.address) {
+      setWalletAddress(account.address);
+    }
+  }, [account?.address, setWalletAddress]);
+
+  // Set up stats update callback - only for agent-triggered updates
+  useEffect(() => {
+    onStatsUpdate(() => {
+      console.log('Stats update callback triggered from agent');
+      setTimeout(() => {
+        fetchArbitrageStats(true); // Background refresh when agent updates stats
+      }, 500); // Small delay to ensure backend has processed
+    });
+  }, [onStatsUpdate, fetchArbitrageStats]);
+
   // Calculate total vault value in USD
   const calculateTotalVaultValue = () => {
     if (!vault || !tokenPrices) return { total: 0, aptBalance: 0 };
-    
+
     let total = 0;
     let aptBalance = 0;
-    
+
     vault.balances.forEach(balance => {
       const symbol = balance.coinSymbol.toUpperCase();
       const price = tokenPrices[symbol];
@@ -43,13 +158,13 @@ const Dashboard = () => {
         const priceNum = parseFloat(priceStr) || 0;
         const value = balanceNum * priceNum;
         total += value;
-        
+
         if (symbol === 'APT') {
           aptBalance = balanceNum;
         }
       }
     });
-    
+
     return { total, aptBalance };
   };
 
@@ -59,13 +174,13 @@ const Dashboard = () => {
 
   // Transform opportunities for display
   const displayOpportunities = (opportunities || []).slice(0, 5).map(opp => {
-    const fromToken = opp.route.from_pair.split('_')[0].toUpperCase();
-    const toToken = opp.route.to_pair.split('_')[1]?.toUpperCase() || 'APT';
-    
+    const fromToken = opp.route.from_pair?.split('_')[0]?.toUpperCase() || 'UNKNOWN';
+    const toToken = opp.route.to_pair?.split('_')[1]?.toUpperCase() || 'APT';
+
     return {
       pair: `${fromToken}/${toToken}`,
       route: `${opp.route.from_dex} → ${opp.route.to_dex}`,
-      spread: `${opp.profitability.price_difference_percent.toFixed(2)}%`,
+      spread: `${(opp.profitability.price_difference_percent || 0).toFixed(2)}%`,
       profit: `$${opp.profitability.net_profit_usd.toFixed(2)}`,
       gas: `${(opp.charges?.gas_fees?.total_gas_cost_apt || 0).toFixed(3)} APT`,
       risk: opp.risk_level.toUpperCase(),
@@ -89,14 +204,14 @@ const Dashboard = () => {
         <Header />
         <main className="pt-24 pb-16 relative z-10">
           <div className="container mx-auto px-4 lg:px-8 text-center">
-            <motion.h1 
+            <motion.h1
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="font-display text-4xl lg:text-5xl font-bold tracking-wide text-foreground mb-4"
             >
               DASHBOARD
             </motion.h1>
-            <motion.p 
+            <motion.p
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2 }}
@@ -110,11 +225,25 @@ const Dashboard = () => {
     );
   }
 
+  // Show skeleton loader during initial load
+  if (isInitialLoad && connected) {
+    return <DashboardSkeleton />;
+  }
+
+
   return (
     <div className="min-h-screen bg-background dark relative overflow-hidden">
       <AnimatedBackground />
       <Header />
-      
+
+      {/* Update Notification */}
+      <UpdateNotification
+        show={showUpdateNotification}
+        message={notificationMessage}
+        type={notificationType}
+        onHide={() => setShowUpdateNotification(false)}
+      />
+
       <main className="pt-24 pb-16 relative z-10">
         <div className="container mx-auto px-4 lg:px-8">
           {/* Page Header */}
@@ -122,75 +251,95 @@ const Dashboard = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
-            className="mb-8"
+            className="mb-8 flex items-center justify-between"
           >
-            <h1 className="font-display text-4xl lg:text-5xl font-bold tracking-wide text-foreground mb-2">
-              DASHBOARD
-            </h1>
-            <p className="text-muted-foreground">
-              Manage your autonomous trading agents.
-            </p>
+            <div>
+              <h1 className="font-display text-4xl lg:text-5xl font-bold tracking-wide text-foreground mb-2">
+                DASHBOARD
+              </h1>
+              <p className="text-muted-foreground">
+                Manage your autonomous trading agents.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fetchArbitrageStats(false)}
+              disabled={isLoadingStats}
+              className="text-primary mr-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoadingStats ? 'animate-spin' : ''}`} />
+              Refresh Stats
+            </Button>
+
           </motion.div>
-          
+
+
+
           {/* Stats Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <StatsCard 
+            <StatsCard
               icon={Wallet}
               label="Total Vault Balance"
               value={`$${vaultStats.total.toFixed(2)}`}
-              subValue={`APT: ${vaultStats.aptBalance.toFixed(4)}`}
+              // subValue={`APT: ${vaultStats.aptBalance.toFixed(4)}`}
               delay={0}
+              isLoading={vaultLoading}
             />
-            <StatsCard 
-              icon={TrendingUp}
-              label="Total P/L"
-              value={`+$${vault?.totalRewardsEarned?.toFixed(2) || '0.00'}`}
-              subValue="All-time vault performance"
-              trend={{ value: "0.0%", isPositive: true }}
-              delay={0.1}
-            />
-            <StatsCard 
+            {(() => {
+              const plValue = isInitialLoad ? 0 : (arbitrageStats?.totalProfitLoss || 0);
+
+              // Temporary simple display for debugging
+              if (!isInitialLoad && arbitrageStats?.totalProfitLoss !== undefined) {
+              }
+
+              return (
+                <StatsCard
+                  icon={TrendingUp}
+                  label="Total Arbitrage"
+                  value={plValue}
+                  subValue={`${arbitrageStats?.totalTrades || 0} trades • ${arbitrageStats?.totalSessions || 0} sessions`}
+                  trend={{
+                    value: arbitrageStats?.totalProfitLoss > 0 ? `+${((arbitrageStats.totalProfitLoss / Math.max(vaultStats.total, 100)) * 100).toFixed(1)}%` : "0.0%",
+                    isPositive: (arbitrageStats?.totalProfitLoss || 0) >= 0
+                  }}
+                  delay={0.1}
+                  isLoading={isInitialLoad}
+                  isAnimated={true}
+                  previousValue={previousStats?.totalProfitLoss}
+                  showChangeIndicator={true}
+                  isUpdating={isLoadingStats && !isInitialLoad}
+                />
+              );
+            })()}
+            <StatsCard
               icon={Bot}
               label="Active Agents"
-              value="0"
-              subValue="No agents deployed yet"
+              value={isRunning ? "1" : "0"}
+              subValue={isRunning ? `ArbiGent running • ${runningDuration}` : "No agents running"}
               delay={0.2}
             />
-            <StatsCard 
+            <StatsCard
               icon={Activity}
               label="APT Price"
               value={aptPrice}
               subValue={`24h: ${aptChange}`}
               delay={0.3}
+              isLoading={marketLoading}
             />
           </div>
-          
+
           {/* Quick Actions */}
-          <motion.div
+          {/* <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.2 }}
             className="mb-8"
           >
             <div className="rounded-xl border border-border bg-card p-6">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-                <h2 className="font-display text-xl font-bold tracking-wide text-foreground">MY ACTIVE AGENTS</h2>
-                <div className="flex gap-3">
-                  <Button variant="outline" size="default" asChild>
-                    <Link to="/vault">
-                      <Vault className="h-4 w-4" />
-                      Go to Vault
-                    </Link>
-                  </Button>
-                  <Button variant="default" size="default" asChild>
-                    <Link to="/agents">
-                      + Launch New Agent
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-              
-              {/* Empty State */}
+
+
+            
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted mb-4">
                   <Shield className="h-8 w-8 text-muted-foreground" />
@@ -207,133 +356,139 @@ const Dashboard = () => {
                 </Button>
               </div>
             </div>
-          </motion.div>
-          
-          {/* Opportunities Table */}
+          </motion.div> */}
+
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
+            transition={{ duration: 0.5 }}
+            className="mb-6"
           >
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="p-6 border-b border-border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="font-display text-xl font-bold tracking-wide text-foreground">
-                      LIVE ARBITRAGE OPPORTUNITIES
-                    </h2>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Real-time opportunities detected across Aptos DEXs
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={refreshOpportunities}
-                      disabled={marketLoading}
-                      className="text-primary"
-                    >
-                      <RefreshCw className={`h-4 w-4 mr-1 ${marketLoading ? 'animate-spin' : ''}`} />
-                      Refresh
-                    </Button>
-                    <Button variant="ghost" size="sm" className="text-primary">
-                      View All
-                      <ExternalLink className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
+            <div className="rounded-xl border border-border bg-card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-display text-xl font-bold tracking-wide text-foreground flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-primary" />
+                  ACTIVE AGENTS
+                </h2>
+                <div className="flex items-center gap-2">
+                  {isRunning && (
+                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-success/20 border border-success/30">
+                      <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+                      <span className="text-xs font-mono text-success">RUNNING</span>
+                    </div>
+                  )}
+                  {/* <span className="text-sm text-muted-foreground">
+                    {isRunning ? '1 Active' : '0 Active'}
+                  </span> */}
+                  {isRunning ?null: (
+  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 text-white">
+    <div className="flex gap-3">
+      <Button variant="outline" size="default" asChild>
+        <Link to="/vault">
+          <Vault className="h-4 w-4" />
+          Go to Vault
+        </Link>
+      </Button>
+      <Button variant="default" size="default" asChild>
+        <Link to="/agents">
+          + Launch New Agent
+        </Link>
+      </Button>
+    </div>
+  </div>
+) }
                 </div>
               </div>
-              
-              {displayOpportunities.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-border bg-muted/30">
-                        <th className="px-6 py-3 text-left text-xs font-display font-bold text-muted-foreground uppercase tracking-wider">Pair</th>
-                        <th className="px-6 py-3 text-left text-xs font-display font-bold text-muted-foreground uppercase tracking-wider">Route</th>
-                        <th className="px-6 py-3 text-left text-xs font-display font-bold text-muted-foreground uppercase tracking-wider">Spread</th>
-                        <th className="px-6 py-3 text-left text-xs font-display font-bold text-muted-foreground uppercase tracking-wider">Est. Profit</th>
-                        <th className="px-6 py-3 text-left text-xs font-display font-bold text-muted-foreground uppercase tracking-wider">Gas</th>
-                        <th className="px-6 py-3 text-left text-xs font-display font-bold text-muted-foreground uppercase tracking-wider">Risk</th>
-                        <th className="px-6 py-3 text-right text-xs font-display font-bold text-muted-foreground uppercase tracking-wider">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {displayOpportunities.map((opp, index) => (
-                        <motion.tr 
-                          key={index}
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          transition={{ delay: 0.4 + index * 0.05 }}
-                          className="hover:bg-muted/20 transition-colors"
-                        >
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-2">
-                              <div className="flex -space-x-2">
-                                <CryptoLogo symbol={opp.pair.split('/')[0] as "APT" | "USDC" | "USDT"} size="sm" />
-                                <CryptoLogo symbol={opp.pair.split('/')[1] as "APT" | "USDC" | "USDT"} size="sm" />
-                              </div>
-                              <span className="font-mono font-semibold text-foreground">{opp.pair}</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="text-sm text-muted-foreground">{opp.route}</span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="font-mono font-semibold text-success">{opp.spread}</span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="font-mono font-semibold text-foreground">{opp.profit}</span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="font-mono text-sm text-muted-foreground">{opp.gas}</span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-mono ${getRiskColor(opp.risk)}`}>
-                              {opp.risk}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <Button 
-                              variant={opp.isExecutable ? "default" : "ghost"} 
-                              size="sm"
-                              disabled={!opp.isExecutable}
-                            >
-                              {opp.isExecutable ? "Execute" : "Low Profit"}
-                            </Button>
-                          </td>
-                        </motion.tr>
+
+              {isRunning ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Agent Status Card */}
+                  <div className="rounded-lg border border-border bg-background/50 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-success animate-pulse" />
+                        <span className="font-display font-bold text-foreground">ArbiGent #1</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">Running: {runningDuration}</span>
+                    </div>
+
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Strategy:</span>
+                        <span className="font-mono text-foreground">{agentConfig.selectedPair}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Risk Level:</span>
+                        <span className="font-mono text-foreground">{agentConfig.riskTolerance}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Min Profit:</span>
+                        <span className="font-mono text-foreground">{agentConfig.minProfitThreshold.toFixed(4)}%</span>
+                      </div>
+                    </div>
+
+                    {/* Performance Metrics */}
+                    <div className="mt-4 pt-3 border-t border-border">
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Session Arbitrage</p>
+                          <p className="font-mono font-bold text-success">+${agentState.totalProfit.toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Trades</p>
+                          <p className="font-mono font-bold text-foreground">{agentState.tradesExecuted}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Success</p>
+                          <p className="font-mono font-bold text-primary">
+                            {agentState.tradesExecuted > 0
+                              ? ((agentState.tradesExecuted / (agentState.tradesExecuted + agentState.tradesSkipped)) * 100).toFixed(0)
+                              : 0}%
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Recent Activity */}
+                  <div className="rounded-lg border border-border bg-background/50 p-4">
+                    <h3 className="font-display font-bold text-foreground mb-3">Recent Activity</h3>
+                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                      {logs.slice(-4).reverse().map((log, index) => (
+                        <div key={index} className="flex items-start gap-2 text-xs">
+                          <span className="text-muted-foreground whitespace-nowrap">[{log.time}]</span>
+                          <span className={`font-mono ${log.type === 'SUCCESS' ? 'text-success' :
+                              log.type === 'ERROR' ? 'text-destructive' :
+                                log.type === 'WARNING' ? 'text-warning' :
+                                  log.type === 'SCAN' ? 'text-primary' :
+                                    'text-muted-foreground'
+                            }`}>
+                            {log.type}
+                          </span>
+                          <span className="text-foreground truncate">{log.message}</span>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
+                      {logs.length === 0 && (
+                        <p className="text-xs text-muted-foreground text-center py-2">No activity yet</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : (
-                <div className="p-12 text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted mx-auto mb-4">
-                    <TrendingUp className="h-8 w-8 text-muted-foreground" />
+                <div className="text-center py-8">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted/50 mx-auto mb-4">
+                    <Shield className="h-8 w-8 text-muted-foreground" />
                   </div>
-                  <h3 className="font-display text-lg font-bold text-foreground mb-2">
-                    {marketLoading ? "Loading Opportunities..." : "No Opportunities Found"}
-                  </h3>
-                  <p className="text-muted-foreground">
-                    {marketLoading 
-                      ? "Scanning DEXs for arbitrage opportunities..." 
-                      : "No profitable arbitrage opportunities detected at the moment."
-                    }
-                  </p>
-                </div>
-              )}
-              
-              {displayOpportunities.length > 0 && (
-                <div className="p-4 border-t border-border text-center">
-                  <p className="text-sm text-muted-foreground">
-                    Showing {displayOpportunities.length} of {opportunities.length} opportunities
-                  </p>
+                  <p className="text-muted-foreground mb-2">No active agents</p>
+                  <p className="text-xs text-muted-foreground">Start an agent to begin autonomous trading</p>
                 </div>
               )}
             </div>
           </motion.div>
+
+
+          {/* Opportunities Table */}
+          
         </div>
       </main>
     </div>

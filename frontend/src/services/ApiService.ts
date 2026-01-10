@@ -330,6 +330,60 @@ class ApiService {
     }
   }
 
+  // Get arbitrage stats
+  async getArbitrageStats(walletAddress: string): Promise<ApiResponse<{ arbitrageStats: any }>> {
+    try {
+      const response = await fetch(`${BACKEND_BASE_URL}/vault/${walletAddress}/arbitrage-stats`);
+      const data = await response.json();
+      
+      
+      if (!response.ok) {
+        return { success: false, error: data.error || 'Failed to get arbitrage stats' };
+      }
+
+      return { success: true, data: { arbitrageStats: data.arbitrageStats } };
+    } catch (error) {
+      console.error('Get arbitrage stats error:', error);
+      return { success: false, error: 'Network error' };
+    }
+  }
+
+  // Update arbitrage stats
+  async updateArbitrageStats(
+    walletAddress: string,
+    sessionStats: {
+      sessionProfit: number;
+      sessionTrades: number;
+      sessionGasFees: number;
+      sessionSlippage: number;
+      bestTrade: number;
+      worstTrade: number;
+    }
+  ): Promise<ApiResponse<{ arbitrageStats: any }>> {
+    try {
+      
+      const response = await fetch(`${BACKEND_BASE_URL}/vault/${walletAddress}/arbitrage-stats`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(sessionStats),
+      });
+
+      const data = await response.json();
+      
+      
+      if (!response.ok) {
+        return { success: false, error: data.error || 'Failed to update arbitrage stats' };
+      }
+
+      return { success: true, data: { arbitrageStats: data.arbitrageStats } };
+    } catch (error) {
+      console.error('Update arbitrage stats error:', error);
+      return { success: false, error: 'Network error' };
+    }
+  }
+
   // ============= EXTERNAL ARBITRAGE API METHODS =============
 
   // Get market overview

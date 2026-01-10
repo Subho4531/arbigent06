@@ -86,8 +86,8 @@ const Index = () => {
                 transition={{ duration: 0.6 }}
               >
                 <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 mb-6">
-                  <Radio className="h-4 w-4 text-primary animate-pulse" />
-                  <span className="text-sm font-display font-bold text-primary">APTOS TESTNET</span>
+                  <Radio className="h-3 w-3 mt-auto text-primary animate-pulse " />
+                  <span className="text-sm font-display font-bold text-primary">CURRENTLY ON APTOS </span>
                 </div>
                 
                 <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-bold leading-none tracking-wide mb-6 text-gradient-hero">

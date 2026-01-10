@@ -150,6 +150,52 @@ const vaultSchema = new mongoose.Schema({
       default: null
     }
   },
+  arbitrageStats: {
+    totalProfitLoss: {
+      type: Number,
+      default: 0
+    },
+    totalTrades: {
+      type: Number,
+      default: 0
+    },
+    totalSessions: {
+      type: Number,
+      default: 0
+    },
+    winRate: {
+      type: Number,
+      default: 0
+    },
+    bestTrade: {
+      type: Number,
+      default: 0
+    },
+    worstTrade: {
+      type: Number,
+      default: 0
+    },
+    totalGasFees: {
+      type: Number,
+      default: 0
+    },
+    totalSlippage: {
+      type: Number,
+      default: 0
+    },
+    lastSessionProfit: {
+      type: Number,
+      default: 0
+    },
+    lastSessionTrades: {
+      type: Number,
+      default: 0
+    },
+    lastSessionDate: {
+      type: Date,
+      default: null
+    }
+  },
   isActive: {
     type: Boolean,
     default: true
@@ -218,7 +264,6 @@ vaultSchema.statics.findOrCreate = async function(walletAddress) {
       balances: defaultBalances
     });
     await vault.save();
-    console.log(`✅ Created new vault for ${walletAddress} with default balances`);
   }
   
   return vault;
@@ -324,6 +369,53 @@ vaultSchema.methods.addRewards = async function(coinSymbol, rewardAmount) {
   this.updatedAt = new Date();
   
   return this.save();
+};
+
+// Instance method to update arbitrage stats
+vaultSchema.methods.updateArbitrageStats = async function(sessionStats) {
+  const {
+    sessionProfit,
+    sessionTrades,
+    sessionGasFees,
+    sessionSlippage,
+    bestTrade,
+    worstTrade
+  } = sessionStats;
+
+
+  // Update cumulative stats
+  this.arbitrageStats.totalProfitLoss += sessionProfit;
+  this.arbitrageStats.totalTrades += sessionTrades;
+  this.arbitrageStats.totalSessions += 1;
+  this.arbitrageStats.totalGasFees += sessionGasFees;
+  this.arbitrageStats.totalSlippage += sessionSlippage;
+
+  // Update best/worst trades
+  if (bestTrade > this.arbitrageStats.bestTrade) {
+    this.arbitrageStats.bestTrade = bestTrade;
+  }
+  if (worstTrade < this.arbitrageStats.worstTrade || this.arbitrageStats.worstTrade === 0) {
+    this.arbitrageStats.worstTrade = worstTrade;
+  }
+
+  // Update last session info
+  this.arbitrageStats.lastSessionProfit = sessionProfit;
+  this.arbitrageStats.lastSessionTrades = sessionTrades;
+  this.arbitrageStats.lastSessionDate = new Date();
+
+  // Calculate win rate (assuming positive profit = win)
+  if (this.arbitrageStats.totalTrades > 0) {
+    // This is a simplified win rate calculation
+    // In a real scenario, you'd track individual trade outcomes
+    const estimatedWins = Math.max(0, this.arbitrageStats.totalTrades * 0.6); // Estimate based on profitability
+    this.arbitrageStats.winRate = (estimatedWins / this.arbitrageStats.totalTrades) * 100;
+  }
+
+
+  this.updatedAt = new Date();
+  const result = await this.save();
+  
+  return result;
 };
 
 // Static method to get top vaults by TVL

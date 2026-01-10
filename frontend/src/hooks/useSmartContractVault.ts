@@ -1,23 +1,15 @@
 import { useState, useCallback } from 'react';
-import { useWallet } from '@/contexts/WalletContext';
 import { useWallet as useAptosWallet } from '@aptos-labs/wallet-adapter-react';
-import { smartContractService, TransactionResult } from '@/services/SmartContractService';
+import { smartContractService } from '@/services/SmartContractService';
 import { apiService } from '@/services/ApiService';
 import { balanceService } from '@/services/BalanceService';
-import { Account, Ed25519PrivateKey, Aptos, AptosConfig, Network, InputTransactionData } from '@aptos-labs/ts-sdk';
+import { Account, Aptos, AptosConfig, Network } from '@aptos-labs/ts-sdk';
 
 // Smart contract configuration
 const CONTRACT_ADDRESS = '0x851c087b280c6853667631d72147716d15276a7383608257ca9736eb01cd6af9';
 const MODULE_NAME = 'swap';
 
-// Extend window type for Petra wallet
-declare global {
-  interface Window {
-    aptos?: {
-      signAndSubmitTransaction: (transaction: InputTransactionData) => Promise<{ hash: string }>;
-    };
-  }
-}
+// Remove the global window.aptos declaration since it conflicts with existing types
 
 export interface UseSmartContractVaultReturn {
   isProcessing: boolean;
@@ -42,10 +34,18 @@ export interface UseSmartContractVaultReturn {
 }
 
 export const useSmartContractVault = (): UseSmartContractVaultReturn => {
-  const { account, connected } = useWallet();
-  const { signAndSubmitTransaction } = useAptosWallet(); // Get the signing function from wallet adapter
+  const { signAndSubmitTransaction, account: aptosAccount, connected } = useAptosWallet(); // Get the signing function from wallet adapter
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Convert account to our format
+  const account = aptosAccount ? {
+    address: aptosAccount.address.toString(),
+    publicKey: Array.isArray(aptosAccount.publicKey) 
+      ? aptosAccount.publicKey.map(pk => pk.toString())
+      : aptosAccount.publicKey.toString(),
+    ansName: aptosAccount.ansName || null
+  } : null;
 
   // Helper to create Account object from wallet
   const getAccountFromWallet = useCallback((): Account | null => {
@@ -62,18 +62,16 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
   }, [account]);
 
   // Helper to sign and submit transaction through wallet adapter
-  const submitTransaction = useCallback(async (transaction: InputTransactionData) => {
+  const submitTransaction = useCallback(async (transaction: any) => {
     if (!account?.address || !signAndSubmitTransaction) {
       throw new Error('Wallet not connected or signing not available');
     }
 
     try {
-      console.log('Submitting transaction:', transaction);
       
       // Use the wallet adapter's signAndSubmitTransaction method
       const response = await signAndSubmitTransaction(transaction);
       
-      console.log('Transaction response:', response);
       
       if (response?.hash) {
         // Wait for transaction confirmation
@@ -93,30 +91,6 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
     }
   }, [account, signAndSubmitTransaction]);
 
-  // Helper to create batch transaction for APT deposit
-  const createBatchTransaction = useCallback(async (
-    aptAmount: string,
-    targetToken: 'USDC' | 'USDT'
-  ) => {
-    const aptos = new Aptos(new AptosConfig({ network: Network.TESTNET }));
-    
-    // Create a multi-sig transaction with both operations
-    const transaction = await aptos.transaction.build.multiAgent({
-      sender: account!.address,
-      data: {
-        function: '0x1::aptos_account::batch_transfer',
-        functionArguments: [
-          // First: Transfer APT to contract
-          [CONTRACT_ADDRESS],
-          [aptAmount]
-        ],
-      },
-      secondarySigners: []
-    });
-
-    return transaction;
-  }, [account]);
-
   // Deposit USDC/USDT directly to vault (burns from wallet)
   const depositTokenToVault = useCallback(async (
     amount: string,
@@ -134,7 +108,6 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       // Convert amount to smallest unit (USDC/USDT have 6 decimals)
       const tokenAmount = (parseFloat(amount) * Math.pow(10, 6)).toString();
       
-      console.log(`🔥 Depositing ${token} to vault:`, { amount, tokenAmount });
 
       // Check wallet balance first
       const walletBalance = await balanceService.fetchAllBalances(account.address);
@@ -147,21 +120,19 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       }
 
       // Use the vault deposit functions that properly burn tokens
-      const transaction: InputTransactionData = {
-        data: {
-          function: token === 'USDC'
-            ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_usdc_to_vault`
-            : `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_usdt_to_vault`,
-          functionArguments: [tokenAmount],
-        },
+      const transaction = {
+        type: "entry_function_payload",
+        function: token === 'USDC'
+          ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_usdc_to_vault`
+          : `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_usdt_to_vault`,
+        arguments: [tokenAmount],
+        type_arguments: [],
       };
 
-      console.log(`📝 Submitting ${token} vault deposit transaction:`, transaction);
 
       const result = await submitTransaction(transaction);
 
       if (result.success && result.hash) {
-        console.log(`✅ ${token} vault deposit successful:`, result.hash);
 
         // Update vault balance in backend
         await apiService.depositToVault(
@@ -171,7 +142,6 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
           result.hash
         );
 
-        console.log(`✅ ${token} vault balance updated in backend`);
         return true;
       } else {
         setError(`${token} vault deposit transaction failed`);
@@ -202,7 +172,6 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       // Convert amount to smallest unit (APT has 8 decimals)
       const aptAmount = (parseFloat(amount) * Math.pow(10, 8)).toString();
       
-      console.log('🔥 Depositing APT directly to vault:', { amount, aptAmount });
 
       // Check wallet balance first
       const walletBalance = await balanceService.fetchAPTBalance(account.address);
@@ -215,19 +184,17 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       }
 
       // Use the direct APT vault deposit function
-      const transaction: InputTransactionData = {
-        data: {
-          function: `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_apt_to_vault`,
-          functionArguments: [aptAmount],
-        },
+      const transaction = {
+        type: "entry_function_payload",
+        function: `${CONTRACT_ADDRESS}::${MODULE_NAME}::deposit_apt_to_vault`,
+        arguments: [aptAmount],
+        type_arguments: [],
       };
 
-      console.log('📝 Submitting APT vault deposit transaction:', transaction);
 
       const result = await submitTransaction(transaction);
 
       if (result.success && result.hash) {
-        console.log('✅ APT vault deposit successful:', result.hash);
 
         // Update vault balance in backend - record as APT
         await apiService.depositToVault(
@@ -237,14 +204,12 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
           result.hash
         );
 
-        console.log('✅ APT vault balance updated in backend');
         return true;
       } else {
         setError('APT vault deposit transaction failed');
         return false;
       }
     } catch (err) {
-      console.error('❌ APT vault deposit error:', err);
       setError(err instanceof Error ? err.message : 'APT vault deposit failed');
       return false;
     } finally {
@@ -269,30 +234,26 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       // Convert amount to smallest unit (APT has 8 decimals)
       const aptAmount = (parseFloat(amount) * Math.pow(10, 8)).toString();
       
-      console.log('🔥 Depositing APT to vault:', { amount, aptAmount, targetToken });
 
       // Call smart contract to swap APT to USDC/USDT
       // This should consume APT from wallet and mint USDC/USDT
-      const transaction: InputTransactionData = {
-        data: {
-          function: targetToken === 'USDC' 
-            ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::swap_apt_to_usdc`
-            : `${CONTRACT_ADDRESS}::${MODULE_NAME}::swap_apt_to_usdt`,
-          functionArguments: [aptAmount],
-        },
+      const transaction = {
+        type: "entry_function_payload",
+        function: targetToken === 'USDC' 
+          ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::swap_apt_to_usdc`
+          : `${CONTRACT_ADDRESS}::${MODULE_NAME}::swap_apt_to_usdt`,
+        arguments: [aptAmount],
+        type_arguments: [],
       };
 
-      console.log('📝 Submitting swap transaction:', transaction);
 
       const result = await submitTransaction(transaction);
 
       if (result.success && result.hash) {
-        console.log('✅ Smart contract swap successful:', result.hash);
 
         // Calculate expected output amount
         const targetAmount = await calculateSwapOutput(aptAmount, 'APT', targetToken);
         
-        console.log('💰 Expected vault increase:', targetAmount, targetToken);
 
         // Update vault balance in backend - record as the target token (USDC/USDT)
         await apiService.depositToVault(
@@ -302,14 +263,12 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
           result.hash
         );
 
-        console.log('✅ Vault balance updated in backend');
         return true;
       } else {
         setError('Smart contract transaction failed');
         return false;
       }
     } catch (err) {
-      console.error('❌ APT deposit error:', err);
       setError(err instanceof Error ? err.message : 'APT deposit failed');
       return false;
     } finally {
@@ -335,7 +294,6 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       const decimals = sourceToken === 'APT' ? 8 : 6;
       const tokenAmount = (parseFloat(amount) * Math.pow(10, decimals)).toString();
       
-      console.log(`🔥 Withdrawing ${sourceToken} from vault:`, { amount, tokenAmount });
 
       // First, check vault balance from backend
       const vaultResponse = await apiService.getUserVault(account.address);
@@ -366,20 +324,18 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
         functionName = `${CONTRACT_ADDRESS}::${MODULE_NAME}::withdraw_usdt_from_vault`;
       }
 
-      const transaction: InputTransactionData = {
-        data: {
-          function: functionName,
-          functionArguments: [tokenAmount],
-        },
+      const transaction = {
+        type: "entry_function_payload",
+        function: functionName,
+        arguments: [tokenAmount],
+        type_arguments: [],
       };
 
-      console.log(`📝 Submitting ${sourceToken} vault withdrawal transaction:`, transaction);
 
       // Sign and submit through wallet
       const result = await submitTransaction(transaction);
 
       if (result.success && result.hash) {
-        console.log(`✅ ${sourceToken} vault withdrawal successful:`, result.hash);
 
         // Update vault balance in backend
         await apiService.withdrawFromVault(
@@ -389,7 +345,6 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
           result.hash
         );
 
-        console.log(`✅ ${sourceToken} vault balance updated in backend`);
         return true;
       } else {
         setError(`${sourceToken} vault withdrawal transaction failed`);
@@ -422,13 +377,13 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       const tokenAmount = (parseFloat(amount) * Math.pow(10, 6)).toString();
       
       // Create transaction data
-      const transaction: InputTransactionData = {
-        data: {
-          function: token === 'USDC'
-            ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::mint_usdc`
-            : `${CONTRACT_ADDRESS}::${MODULE_NAME}::mint_usdt`,
-          functionArguments: [tokenAmount],
-        },
+      const transaction = {
+        type: "entry_function_payload",
+        function: token === 'USDC'
+          ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::mint_usdc`
+          : `${CONTRACT_ADDRESS}::${MODULE_NAME}::mint_usdt`,
+        arguments: [tokenAmount],
+        type_arguments: [],
       };
 
       // Sign and submit through wallet
@@ -469,13 +424,13 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       const tokenAmount = (parseFloat(amount) * Math.pow(10, 6)).toString();
       
       // Create transaction data
-      const transaction: InputTransactionData = {
-        data: {
-          function: fromToken === 'USDC' && toToken === 'USDT'
-            ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::swap_usdc_to_usdt`
-            : `${CONTRACT_ADDRESS}::${MODULE_NAME}::swap_usdt_to_usdc`,
-          functionArguments: [tokenAmount],
-        },
+      const transaction = {
+        type: "entry_function_payload",
+        function: fromToken === 'USDC' && toToken === 'USDT'
+          ? `${CONTRACT_ADDRESS}::${MODULE_NAME}::swap_usdc_to_usdt`
+          : `${CONTRACT_ADDRESS}::${MODULE_NAME}::swap_usdt_to_usdc`,
+        arguments: [tokenAmount],
+        type_arguments: [],
       };
 
       // Sign and submit through wallet
@@ -555,7 +510,6 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       const inputInSmallestUnits = BigInt(inputAmount);
       let outputInSmallestUnits = 0n;
 
-      console.log(`🔢 Calculating swap: ${inputAmount} ${fromToken} → ${toToken}`);
 
       if (fromToken === 'APT' && toToken === 'USDC') {
         // APT to USDC: rate = 8000000 / 100000000 = 0.08 USDC per APT
@@ -580,7 +534,6 @@ export const useSmartContractVault = (): UseSmartContractVaultReturn => {
       }
 
       const result = outputInSmallestUnits.toString();
-      console.log(`🔢 Swap calculation result: ${result} (${fromToken} → ${toToken})`);
       
       return result;
     } catch (err) {

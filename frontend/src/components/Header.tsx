@@ -59,7 +59,7 @@ const Header = () => {
         </Link>
         
         {/* Network Status Display */}
-        <NetworkStatusCompact className="hidden md:flex" />
+        {/* <NetworkStatusCompact className="hidden md:flex" /> */}
         
         {/* Desktop Navigation */}
         {!isLanding && (
