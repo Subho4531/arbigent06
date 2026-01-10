@@ -52,20 +52,15 @@ const Vault = () => {
       if (!account?.address) return;
       
       try {
-        console.log('🔍 Loading wallet balances for:', account.address);
         
         // Test individual balance fetching
         const aptBalance = await balanceService.fetchAPTBalance(account.address);
-        console.log('💰 APT Balance:', aptBalance);
         
         const usdcBalance = await balanceService.fetchUSDCBalance(account.address);
-        console.log('💰 USDC Balance:', usdcBalance);
         
         const usdtBalance = await balanceService.fetchUSDTBalance(account.address);
-        console.log('💰 USDT Balance:', usdtBalance);
         
         const allBalances = { APT: aptBalance, USDC: usdcBalance, USDT: usdtBalance };
-        console.log('📊 All Balances:', allBalances);
         
         setWalletBalances(allBalances);
       } catch (err) {
