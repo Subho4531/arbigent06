@@ -1,0 +1,17 @@
+# Aptos Arbitrage API Dependencies
+
+# FastAPI and server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+
+# HTTP client for API calls
+aiohttp>=3.9.0
+
+# LangChain and AI dependencies (optional - graceful fallback if not available)
+langchain
+langchain-openai
+langchain-core
+langchain-community
+openai
+
